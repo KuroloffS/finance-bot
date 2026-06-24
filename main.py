@@ -68,13 +68,25 @@ def main() -> None:
     application.post_init = on_startup
     application.post_shutdown = on_shutdown
 
-    logger.info("Starting bot in polling mode")
     # allowed_updates=ALL_TYPES is required so inline button presses (callback_query)
     # are delivered — without it /reset and 🗑 delete buttons never reach the bot.
-    application.run_polling(
-        drop_pending_updates=True,
-        allowed_updates=Update.ALL_TYPES,
-    )
+    webhook_url = webhook_url.strip().rstrip("/")
+    if webhook_url:
+        logger.info("Starting webhook on port %s → %s/webhook", port, webhook_url)
+        application.run_webhook(
+            listen="0.0.0.0",
+            port=port,
+            url_path="webhook",
+            webhook_url=f"{webhook_url}/webhook",
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES,
+        )
+    else:
+        logger.info("Starting bot in polling mode (no WEBHOOK_URL set)")
+        application.run_polling(
+            drop_pending_updates=True,
+            allowed_updates=Update.ALL_TYPES,
+        )
 
 
 if __name__ == "__main__":
