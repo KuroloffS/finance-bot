@@ -104,8 +104,17 @@ async def save_transaction(
     merchant: str | None,
     ai_advice: str,
     input_type: str = "text",
+    purchase_date: str | None = None,
 ) -> dict:
     try:
+        # Validate/normalize an optional explicit date; fall back to today (Tashkent).
+        pdate = now_local().date().isoformat()
+        if purchase_date:
+            try:
+                pdate = date.fromisoformat(str(purchase_date)[:10]).isoformat()
+            except ValueError:
+                pass
+
         def _insert():
             return (
                 get_client()
@@ -119,7 +128,7 @@ async def save_transaction(
                         "merchant": merchant,
                         "ai_advice": ai_advice,
                         "input_type": input_type,
-                        "purchase_date": now_local().date().isoformat(),
+                        "purchase_date": pdate,
                     }
                 )
                 .execute()
@@ -308,6 +317,55 @@ async def get_last_transactions(user_id: int, limit: int = 10) -> list[dict]:
     except Exception as e:
         logger.error("get_last_transactions error user_id=%s: %s", user_id, e)
         return []
+
+
+async def get_transactions_for_month(user_id: int, month_first: str) -> list[dict]:
+    """All transactions within the month starting at `month_first` ('YYYY-MM-01'),
+    newest first. Used by the Mini App transactions list (grouped by date)."""
+    try:
+        start = date.fromisoformat(month_first)
+        if start.month == 12:
+            nxt = date(start.year + 1, 1, 1)
+        else:
+            nxt = date(start.year, start.month + 1, 1)
+
+        def _select():
+            return (
+                get_client()
+                .table("transactions")
+                .select("*")
+                .eq("user_id", user_id)
+                .gte("purchase_date", start.isoformat())
+                .lt("purchase_date", nxt.isoformat())
+                .order("purchase_date", desc=True)
+                .order("created_at", desc=True)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_select)
+        return result.data if (result and result.data) else []
+    except Exception as e:
+        logger.error("get_transactions_for_month error user_id=%s month=%s: %s", user_id, month_first, e)
+        return []
+
+
+async def get_user(user_id: int) -> dict:
+    """Plain fetch of a user row (no create). Returns {} if not found."""
+    try:
+        def _select():
+            return (
+                get_client()
+                .table("users")
+                .select("*")
+                .eq("telegram_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_select)
+        return result.data[0] if (result and result.data) else {}
+    except Exception as e:
+        logger.error("get_user error user_id=%s: %s", user_id, e)
+        return {}
 
 
 async def update_budget(user_id: int, amount: float) -> None:

@@ -57,6 +57,8 @@ TEXTS = {
         "reset_done": "🗑 <b>Готово.</b> Удалено: {count}.",
         "reset_cancelled": "✅ Отменено. Все данные на месте.",
         "menu_hint": "Готово! Пользуйся кнопками внизу 👇",
+        "open_app_hint": "📱 <b>Финансовое приложение</b>\nКрасивая аналитика, графики и быстрое добавление трат — всё в одном экране.",
+        "app_unavailable": "📱 Приложение ещё не настроено (нужен публичный адрес). Пользуйся кнопками меню.",
         "budget_view": (
             "💰 <b>Месячный бюджет</b>\n"
             "━━━━━━━━━━━━━━━━━━━\n\n"
@@ -125,6 +127,8 @@ TEXTS = {
         "reset_done": "🗑 <b>Done.</b> Deleted: {count}.",
         "reset_cancelled": "✅ Cancelled. All data is intact.",
         "menu_hint": "Done! Use the buttons below 👇",
+        "open_app_hint": "📱 <b>Finance app</b>\nBeautiful analytics, charts and quick add — all on one screen.",
+        "app_unavailable": "📱 The app isn't configured yet (needs a public URL). Use the menu buttons.",
         "budget_view": (
             "💰 <b>Monthly budget</b>\n"
             "━━━━━━━━━━━━━━━━━━━\n\n"

@@ -1,4 +1,5 @@
 import logging
+import os
 from datetime import datetime
 from html import escape
 
@@ -24,6 +25,7 @@ from bot.keyboards import (
     report_keyboard,
     reset_confirm_keyboard,
     saved_card_keyboard,
+    webapp_keyboard,
 )
 from services.groq_service import (
     get_savings_tips,
@@ -83,6 +85,15 @@ async def _typing(update: Update, action: ChatAction = ChatAction.TYPING) -> Non
 
 def _budget_of(user: dict) -> float:
     return float(user.get("monthly_budget", 5_000_000) or 5_000_000)
+
+
+def _webapp_url() -> str:
+    url = os.getenv("WEBAPP_URL", "").strip().rstrip("/")
+    if not url:
+        dom = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
+        if dom:
+            url = "https://" + dom.rstrip("/")
+    return url
 
 
 async def _build_context(user: dict, user_id: int) -> tuple[dict, float, float]:
@@ -176,8 +187,29 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             parse_mode="HTML",
             reply_markup=main_menu_keyboard(lang),
         )
+        url = _webapp_url()
+        if url:
+            await update.message.reply_text(
+                t("open_app_hint", lang), parse_mode="HTML", reply_markup=webapp_keyboard(url, lang)
+            )
     except Exception as e:
         logger.error("start_handler error: %s", e)
+        await update.message.reply_text(t("error_generic", "ru"))
+
+
+async def app_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        user = await _get_user(update)
+        lang = user.get("language", "ru")
+        url = _webapp_url()
+        if not url:
+            await update.message.reply_text(t("app_unavailable", lang), parse_mode="HTML")
+            return
+        await update.message.reply_text(
+            t("open_app_hint", lang), parse_mode="HTML", reply_markup=webapp_keyboard(url, lang)
+        )
+    except Exception as e:
+        logger.error("app_handler error: %s", e)
         await update.message.reply_text(t("error_generic", "ru"))
 
 
@@ -751,6 +783,7 @@ _ROUTE_FUNCS.update({
 
 def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("start", start_handler))
+    application.add_handler(CommandHandler("app", app_handler))
     application.add_handler(CommandHandler("help", help_handler))
     application.add_handler(CommandHandler("budget", budget_handler))
     application.add_handler(CommandHandler("report", report_handler))

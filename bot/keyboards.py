@@ -3,9 +3,17 @@ from telegram import (
     InlineKeyboardMarkup,
     KeyboardButton,
     ReplyKeyboardMarkup,
+    WebAppInfo,
 )
 
 from utils.formatters import CATEGORY_EMOJI, format_amount
+
+
+def webapp_keyboard(url: str, lang: str = "ru") -> InlineKeyboardMarkup:
+    label = "📱 Открыть приложение" if lang == "ru" else "📱 Open the app"
+    return InlineKeyboardMarkup(
+        [[InlineKeyboardButton(label, web_app=WebAppInfo(url=url))]]
+    )
 
 # ───────────────────────── Menu button labels ─────────────────────────
 # These exact strings are also matched in handlers.BUTTON_ROUTES.

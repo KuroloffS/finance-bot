@@ -1,0 +1,605 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<title>Финансы</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+:root{
+  --bg:#0C0E16; --bg-elev:#10121C; --surface:#161826; --surface-2:#1E2133; --surface-3:#262A40;
+  --text:#F2F4FB; --muted:#9398B6; --faint:#666C8C;
+  --accent:#6C7BFF; --accent-2:#43E0D8; --ink:#0A0B12;
+  --pos:#3FE08A; --warn:#FFC24B; --dang:#FF6B6B;
+  --border:#2A2E45; --hair:#23263A; --scrim:rgba(6,7,12,.62);
+  --glow:rgba(108,123,255,.22);
+  --r:16px; --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;padding:0;height:100%}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Segoe UI",Roboto,system-ui,sans-serif;
+  letter-spacing:-.01em; line-height:1.4; overscroll-behavior-y:none;
+  background-image:radial-gradient(120% 60% at 50% -10%, rgba(108,123,255,.10), transparent 60%);
+}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1}
+.app{max-width:520px;margin:0 auto;min-height:100%;padding-top:var(--safe-t);padding-bottom:calc(86px + var(--safe-b));}
+.screen{display:none;padding:14px 14px 0;animation:fade .25s ease}
+.screen.active{display:block}
+@keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.eyebrow{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 8px 2px}
+.card{background:var(--surface);border:1px solid var(--hair);border-radius:var(--r);padding:16px;margin-bottom:14px}
+.h1{font-size:17px;font-weight:700;margin:0}
+.row{display:flex;align-items:center}
+.sp{justify-content:space-between}
+.muted{color:var(--muted)} .faint{color:var(--faint)}
+.pos{color:var(--pos)} .warn{color:var(--warn)} .dang{color:var(--dang)}
+
+/* Header */
+.hdr{display:flex;align-items:center;gap:11px;margin:2px 2px 14px}
+.avatar{width:38px;height:38px;border-radius:50%;background:conic-gradient(from 0deg,var(--accent),var(--accent-2),var(--accent));animation:spin 9s linear infinite;display:flex;align-items:center;justify-content:center;font-weight:800;color:#fff;font-size:15px;flex:0 0 auto}
+.avatar span{width:32px;height:32px;border-radius:50%;background:var(--bg-elev);display:flex;align-items:center;justify-content:center}
+@keyframes spin{to{transform:rotate(360deg)}}
+@media (prefers-reduced-motion:reduce){.avatar{animation:none}}
+.hello{font-size:15px;font-weight:700}
+.scrub{display:flex;align-items:center;gap:8px;margin-top:1px;font-size:12px;color:var(--muted)}
+.scrub button{background:var(--surface-2);border:1px solid var(--hair);color:var(--text);width:24px;height:24px;border-radius:8px;font-size:13px;cursor:pointer}
+.scrub b{min-width:96px;text-align:center;font-weight:700;color:var(--text)}
+
+/* Donut */
+.donut-wrap{display:flex;gap:14px;align-items:center}
+.donut{position:relative;width:150px;height:150px;flex:0 0 auto}
+.donut svg{width:150px;height:150px;display:block}
+.donut-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;text-align:center}
+.donut-center .lbl{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
+.donut-center .big{font-size:21px;font-weight:800;margin-top:2px}
+.donut-center .sub{font-size:10px;color:var(--muted);margin-top:1px}
+.legend{flex:1;display:flex;flex-direction:column;gap:9px;min-width:0}
+.lg{display:flex;align-items:center;gap:8px;font-size:12.5px;cursor:pointer}
+.lg .sw{width:9px;height:9px;border-radius:3px;flex:0 0 auto}
+.lg .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lg .pc{font-weight:700}
+.lg.dim{opacity:.4}
+
+/* Arc gauge */
+.gauge-wrap{display:flex;gap:14px;align-items:center}
+.gauge{position:relative;width:128px;height:80px;flex:0 0 auto}
+.gauge svg{width:128px;height:80px;display:block;overflow:visible}
+.gauge .read{position:absolute;left:0;right:0;bottom:2px;text-align:center}
+.gauge .read b{font-size:22px;font-weight:800}
+.gauge .read i{font-size:12px;font-style:normal;color:var(--muted)}
+.gmeta{flex:1;font-size:12.5px}
+.gmeta .l{display:flex;justify-content:space-between;margin-bottom:4px}
+.gmeta .pace{color:var(--faint);font-size:11px;margin-top:6px;line-height:1.45}
+.pill{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px}
+
+/* Insight */
+.insight{background:linear-gradient(135deg,rgba(108,123,255,.16),rgba(67,224,216,.06));border:1px solid var(--border);border-radius:14px;padding:13px 14px;font-size:13px;display:flex;gap:9px;align-items:flex-start}
+.insight .ic{font-size:16px}
+
+/* Transactions */
+.daygrp{margin-bottom:14px}
+.dayhdr{position:sticky;top:0;display:flex;justify-content:space-between;align-items:baseline;padding:6px 4px;font-size:12.5px;color:var(--muted);background:linear-gradient(var(--bg),var(--bg) 70%,transparent);z-index:2}
+.dayhdr b{font-weight:700;color:var(--text)}
+.dayhdr .tot{font-weight:600}
+.txcard{background:var(--surface);border:1px solid var(--hair);border-radius:14px;overflow:hidden}
+.txrow-wrap{position:relative;overflow:hidden}
+.txrow-wrap .del{position:absolute;top:0;right:0;bottom:0;width:64px;background:var(--dang);display:flex;align-items:center;justify-content:center;font-size:18px;color:#fff}
+.txrow{position:relative;display:flex;align-items:center;gap:11px;padding:9px 12px;background:var(--surface);transition:transform .18s cubic-bezier(.22,1,.36,1);touch-action:pan-y}
+.txrow + .txrow,.txrow-wrap + .txrow-wrap .txrow{border-top:1px solid var(--hair)}
+.txrow-wrap:not(:first-child){border-top:1px solid var(--hair)}
+.ti{width:36px;height:36px;border-radius:11px;display:flex;align-items:center;justify-content:center;font-size:18px;flex:0 0 auto}
+.tx-mid{flex:1;min-width:0}
+.tx-mid .t1{font-size:13.5px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tx-mid .t2{font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;margin-top:1px}
+.tx-amt{font-size:15px;font-weight:700;flex:0 0 auto}
+
+/* search + chips */
+.search{width:100%;background:var(--surface-2);border:1px solid var(--hair);border-radius:12px;color:var(--text);padding:10px 12px;font-size:13px;margin-bottom:10px}
+.search::placeholder{color:var(--faint)}
+.chiprail{display:flex;gap:7px;overflow-x:auto;padding-bottom:10px;scrollbar-width:none}
+.chiprail::-webkit-scrollbar{display:none}
+.chip{flex:0 0 auto;padding:6px 12px;border-radius:999px;background:var(--surface-2);border:1px solid var(--hair);font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap}
+.chip.on{background:var(--accent);color:#fff;border-color:transparent}
+
+/* analytics bars */
+.bar{display:flex;align-items:center;gap:9px;margin-bottom:11px;font-size:12.5px}
+.bar .nm{width:96px;display:flex;align-items:center;gap:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:0 0 auto}
+.bar .track{flex:1;height:9px;border-radius:6px;background:var(--surface-3);overflow:hidden}
+.bar .fill{height:100%;border-radius:6px;transition:width .7s cubic-bezier(.22,1,.36,1)}
+.bar .pc{width:38px;text-align:right;font-weight:700}
+.stack{display:flex;height:11px;border-radius:6px;overflow:hidden;gap:2px;margin-bottom:16px}
+.kpis{display:flex;gap:10px}
+.kpi{flex:1;background:var(--surface-2);border:1px solid var(--hair);border-radius:13px;padding:11px 10px;text-align:center}
+.kpi .v{font-size:15px;font-weight:800}
+.kpi .k{font-size:10px;color:var(--muted);margin-top:3px}
+
+/* profile */
+.seg{display:flex;gap:8px}
+.seg button{flex:1;padding:10px;border-radius:12px;background:var(--surface-2);border:1px solid var(--hair);color:var(--text);font-size:13px;font-weight:600;cursor:pointer}
+.seg button.on{background:var(--accent);color:#fff;border-color:transparent}
+.listbtn{width:100%;display:flex;justify-content:space-between;align-items:center;background:var(--surface);border:1px solid var(--hair);border-radius:13px;padding:14px;color:var(--text);font-size:14px;font-weight:600;cursor:pointer;margin-bottom:10px}
+.listbtn.dz{color:var(--dang)}
+
+/* tab bar */
+.tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;justify-content:center;pointer-events:none}
+.tabbar .inner{pointer-events:auto;width:100%;max-width:520px;height:calc(64px + var(--safe-b));padding-bottom:var(--safe-b);background:rgba(16,18,28,.82);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--hair);display:flex;align-items:center;justify-content:space-around;position:relative}
+.tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:none;color:var(--faint);font-size:10px;font-weight:600;cursor:pointer;padding:8px 0}
+.tab .ic{font-size:19px;line-height:1}
+.tab.on{color:var(--accent)}
+.fab{position:absolute;left:50%;top:-18px;transform:translateX(-50%);width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));border:none;color:#fff;font-size:28px;font-weight:300;cursor:pointer;box-shadow:0 8px 24px var(--glow);display:flex;align-items:center;justify-content:center}
+.fab:active{transform:translateX(-50%) scale(.94)}
+
+/* add sheet */
+.sheetwrap{position:fixed;inset:0;z-index:50;display:none}
+.sheetwrap.open{display:block}
+.sheet-scrim{position:absolute;inset:0;background:var(--scrim);backdrop-filter:blur(2px);opacity:0;transition:opacity .25s}
+.sheetwrap.open .sheet-scrim{opacity:1}
+.sheet{position:absolute;left:0;right:0;bottom:0;max-width:520px;margin:0 auto;background:var(--bg-elev);border-radius:24px 24px 0 0;border:1px solid var(--border);border-bottom:none;padding:8px 16px calc(20px + var(--safe-b));transform:translateY(100%);transition:transform .3s cubic-bezier(.22,1,.36,1);max-height:92vh;overflow-y:auto}
+.sheetwrap.open .sheet{transform:translateY(0)}
+.grab{width:40px;height:4px;border-radius:3px;background:var(--surface-3);margin:6px auto 12px}
+.sheet h3{margin:0 0 14px;font-size:17px;font-weight:700;text-align:center}
+.qa{display:flex;gap:8px;background:linear-gradient(135deg,rgba(108,123,255,.14),rgba(67,224,216,.05));border:1px solid var(--border);border-radius:13px;padding:6px 6px 6px 12px;align-items:center;margin-bottom:14px}
+.qa input{flex:1;background:none;border:none;color:var(--text);font-size:13px;outline:none}
+.qa input::placeholder{color:var(--muted)}
+.qa button{background:var(--accent);border:none;color:#fff;width:34px;height:34px;border-radius:10px;font-size:16px;cursor:pointer}
+.divider{text-align:center;color:var(--faint);font-size:11px;margin:6px 0 14px;position:relative}
+.amount{text-align:center;margin:6px 0 16px}
+.amount input{width:100%;background:none;border:none;text-align:center;color:var(--text);font-size:38px;font-weight:800;letter-spacing:-.02em;outline:none}
+.amount input::placeholder{color:var(--surface-3)}
+.amount .cur{font-size:13px;color:var(--muted);margin-top:-4px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+.cchip{flex:1 1 28%;min-width:0;padding:10px 6px;border-radius:12px;background:var(--surface-2);border:1px solid var(--hair);font-size:12px;font-weight:600;cursor:pointer;text-align:center;display:flex;flex-direction:column;gap:3px;align-items:center}
+.cchip .e{font-size:18px}
+.cchip .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.field{display:flex;gap:10px;margin-bottom:14px}
+.field input{flex:1;background:var(--surface-2);border:1px solid var(--hair);border-radius:12px;color:var(--text);padding:11px 12px;font-size:13px;outline:none}
+.field input::placeholder{color:var(--faint)}
+.submit{width:100%;background:linear-gradient(135deg,var(--accent),var(--accent-2));border:none;color:#fff;font-size:15px;font-weight:700;padding:15px;border-radius:14px;cursor:pointer}
+.submit:disabled{opacity:.45}
+
+/* toast */
+.toast{position:fixed;left:50%;bottom:calc(96px + var(--safe-b));transform:translateX(-50%) translateY(20px);background:var(--surface-3);border:1px solid var(--border);border-radius:13px;padding:11px 16px;font-size:13px;display:flex;gap:14px;align-items:center;opacity:0;transition:all .25s;z-index:60;pointer-events:none;max-width:90%}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0);pointer-events:auto}
+.toast button{background:none;border:none;color:var(--accent);font-weight:700;font-size:13px;cursor:pointer}
+
+/* skeleton + empty + gate */
+.sk{background:linear-gradient(90deg,var(--surface) 25%,var(--surface-2) 50%,var(--surface) 75%);background-size:200% 100%;animation:sh 1.3s infinite;border-radius:12px}
+@keyframes sh{to{background-position:-200% 0}}
+.empty{text-align:center;color:var(--muted);padding:40px 20px;font-size:13.5px}
+.empty .e{font-size:34px;display:block;margin-bottom:10px}
+.gate{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px;gap:8px}
+.gate .e{font-size:46px}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <!-- OVERVIEW -->
+  <section class="screen active" id="s-overview">
+    <div class="hdr">
+      <div class="avatar"><span id="ava">🙂</span></div>
+      <div>
+        <div class="hello" id="hello">Привет!</div>
+        <div class="scrub"><button id="mPrev">‹</button><b id="mLabel">—</b><button id="mNext">›</button></div>
+      </div>
+    </div>
+    <div id="ovBody"></div>
+  </section>
+
+  <!-- TRANSACTIONS -->
+  <section class="screen" id="s-transactions">
+    <div class="row sp" style="margin:2px 2px 12px"><div class="h1">Траты</div><div class="muted" id="txCount" style="font-size:12px"></div></div>
+    <input class="search" id="txSearch" placeholder="🔍 Поиск по тратам…">
+    <div class="chiprail" id="txChips"></div>
+    <div id="txBody"></div>
+  </section>
+
+  <!-- ANALYTICS -->
+  <section class="screen" id="s-analytics">
+    <div class="row sp" style="margin:2px 2px 12px"><div class="h1">Аналитика</div>
+      <div class="scrub"><button id="aPrev">‹</button><b id="aLabel" style="min-width:88px">—</b><button id="aNext">›</button></div>
+    </div>
+    <div id="anBody"></div>
+  </section>
+
+  <!-- PROFILE -->
+  <section class="screen" id="s-profile">
+    <div class="hdr"><div class="avatar"><span id="ava2">🙂</span></div><div class="hello" id="hello2">Профиль</div></div>
+    <div id="prBody"></div>
+  </section>
+</div>
+
+<!-- TAB BAR -->
+<nav class="tabbar"><div class="inner">
+  <button class="tab on" data-tab="overview"><span class="ic">⌂</span>Обзор</button>
+  <button class="tab" data-tab="transactions"><span class="ic">≣</span>Траты</button>
+  <button class="fab" id="fab">+</button>
+  <button class="tab" data-tab="analytics"><span class="ic">▦</span>Аналитика</button>
+  <button class="tab" data-tab="profile"><span class="ic">☻</span>Профиль</button>
+</div></nav>
+
+<!-- ADD SHEET -->
+<div class="sheetwrap" id="sheet">
+  <div class="sheet-scrim" id="scrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <h3 id="sheetTitle">Новая трата</h3>
+    <div class="qa"><input id="qaInput" placeholder="✨ «кофе 25к в Chinar» — впишу за тебя"><button id="qaBtn">→</button></div>
+    <div class="divider">— или вручную —</div>
+    <div class="amount"><input id="amt" inputmode="numeric" placeholder="0"><div class="cur" id="curLbl">сум</div></div>
+    <div class="chips" id="catChips"></div>
+    <div class="field">
+      <input id="note" placeholder="Заметка / магазин">
+      <input id="pdate" type="date">
+    </div>
+    <button class="submit" id="submit" disabled>Записать</button>
+  </div>
+</div>
+
+<div class="toast" id="toast"><span id="toastMsg"></span><button id="toastAct"></button></div>
+<div class="gate" id="gate" style="display:none"><div class="e">📱</div><div style="font-weight:700">Открой приложение из Telegram</div><div class="muted" style="font-size:13px">Нажми кнопку «💼 Финансы» в боте.</div></div>
+
+<script>
+"use strict";
+const TG = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+const INIT = TG ? TG.initData : "";
+
+const CAT_COLOR = {
+  "Продукты":"#5BD6A0","Кафе и рестораны":"#FF8A5B","Транспорт":"#5BA8FF",
+  "Жильё и коммуналка":"#9B8CFF","Здоровье":"#FF6FA5","Развлечения":"#C77DFF",
+  "Шоппинг":"#FFC24B","Работа и бизнес":"#4FD1E0","Другое":"#8A90B0"
+};
+const CAT_EMOJI = {
+  "Продукты":"🛒","Кафе и рестораны":"🍽️","Транспорт":"🚗","Жильё и коммуналка":"🏠",
+  "Здоровье":"💊","Развлечения":"🎬","Шоппинг":"🛍️","Работа и бизнес":"💼","Другое":"📦"
+};
+const SRC_EMOJI={text:"⌨️",voice:"🎤",photo:"📸",audio:"🎧",app:"📱"};
+const MONTHS=["январь","февраль","март","апрель","май","июнь","июль","август","сентябрь","октябрь","ноябрь","декабрь"];
+const MONTHS_GEN=["января","февраля","марта","апреля","мая","июня","июля","августа","сентября","октября","ноября","декабря"];
+const WD=["вс","пн","вт","ср","чт","пт","сб"];
+const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion:reduce)").matches;
+
+let LANG="ru", CUR="сум", BUDGET=5000000, OFFSET=0, AN_OFFSET=0, OVERVIEW=null, TXS=[], TXFILTER={cat:null,q:""};
+
+/* ── utils ── */
+function money(v){v=Math.round(Number(v)||0);return v.toLocaleString("ru-RU").replace(/,/g," ")+" "+CUR;}
+function moneyShort(v){v=Number(v)||0;if(v>=1e6)return (v/1e6).toFixed(2).replace(".",",")+" млн";if(v>=1e3)return Math.round(v/1e3)+" тыс";return Math.round(v).toString();}
+function num(v){return (Math.round(Number(v)||0)).toLocaleString("ru-RU").replace(/,/g," ");}
+function el(html){const d=document.createElement("div");d.innerHTML=html.trim();return d.firstChild;}
+function haptic(type,style){try{if(!TG)return;const h=TG.HapticFeedback;if(type==="sel")h.selectionChanged();else if(type==="impact")h.impactOccurred(style||"light");else if(type==="notif")h.notificationOccurred(style||"success");}catch(e){}}
+function monthKey(off){const d=new Date();d.setDate(1);d.setMonth(d.getMonth()+off);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");}
+function monthLabel(off){const d=new Date();d.setDate(1);d.setMonth(d.getMonth()+off);return MONTHS[d.getMonth()].charAt(0).toUpperCase()+MONTHS[d.getMonth()].slice(1)+" "+d.getFullYear();}
+function zoneColor(p){return p<60?"var(--pos)":(p<=85?"var(--warn)":"var(--dang)");}
+
+async function api(path,opts){
+  opts=opts||{};
+  const headers=Object.assign({"X-Telegram-Init-Data":INIT},opts.headers||{});
+  if(opts.body){headers["Content-Type"]="application/json";opts.body=JSON.stringify(opts.body);}
+  const r=await fetch(path,Object.assign({},opts,{headers}));
+  if(!r.ok){let d={};try{d=await r.json()}catch(e){}throw new Error(d.detail||("HTTP "+r.status));}
+  return r.json();
+}
+
+/* ── toast ── */
+let toastTimer=null;
+function toast(msg,actLabel,actFn,ms){
+  const t=document.getElementById("toast");
+  document.getElementById("toastMsg").textContent=msg;
+  const b=document.getElementById("toastAct");
+  if(actLabel){b.textContent=actLabel;b.style.display="";b.onclick=()=>{actFn&&actFn();hideToast();};}else{b.style.display="none";}
+  t.classList.add("show");
+  clearTimeout(toastTimer);toastTimer=setTimeout(hideToast,ms||3000);
+}
+function hideToast(){document.getElementById("toast").classList.remove("show");}
+
+/* ── SVG charts ── */
+function donutSVG(cats,total){
+  const C=2*Math.PI*40, GAP=2;
+  let off=0, segs="";
+  cats.forEach((c,i)=>{
+    if(c.total<=0)return;
+    const len=Math.max(0,(c.share/100)*C-GAP);
+    const color=CAT_COLOR[c.category]||"#8A90B0";
+    const dash=reduce?`${len} ${C-len}`:`0 ${C}`;
+    segs+=`<circle class="seg" data-i="${i}" cx="50" cy="50" r="40" fill="none" stroke="${color}" stroke-width="13" stroke-linecap="round" stroke-dasharray="${dash}" stroke-dashoffset="${-off}" data-len="${len}"/>`;
+    off+=(c.share/100)*C;
+  });
+  return `<svg viewBox="0 0 100 100"><g transform="rotate(-90 50 50)"><circle cx="50" cy="50" r="40" fill="none" stroke="#1E2133" stroke-width="13"/>${segs}</g></svg>`;
+}
+function animateDonut(box){
+  if(reduce)return;
+  const segs=box.querySelectorAll(".seg"),C=2*Math.PI*40;
+  segs.forEach((s,i)=>{const len=parseFloat(s.dataset.len);setTimeout(()=>{s.style.transition="stroke-dasharray .7s cubic-bezier(.22,1,.36,1)";s.setAttribute("stroke-dasharray",`${len} ${C-len}`);},60+i*40);});
+}
+function gaugeSVG(pct){
+  const L=157, p=Math.min(100,Math.max(0,pct)), col=zoneColor(pct);
+  const dashoff=reduce?L*(1-p/100):L;
+  return `<svg viewBox="0 0 120 74"><path d="M10 64 A50 50 0 0 1 110 64" fill="none" stroke="#1E2133" stroke-width="11" stroke-linecap="round"/>`+
+    `<path class="gfill" d="M10 64 A50 50 0 0 1 110 64" fill="none" stroke="${col}" stroke-width="11" stroke-linecap="round" stroke-dasharray="${L}" stroke-dashoffset="${dashoff}" data-target="${L*(1-p/100)}"/></svg>`;
+}
+function animateGauge(box){if(reduce)return;const f=box.querySelector(".gfill");if(!f)return;setTimeout(()=>{f.style.transition="stroke-dashoffset .7s cubic-bezier(.22,1,.36,1)";f.setAttribute("stroke-dashoffset",f.dataset.target);},80);}
+function trendSVG(data){
+  if(!data||!data.length)data=[0];
+  const W=300,H=80,mx=Math.max(...data,1),n=data.length;
+  const pts=data.map((v,i)=>[ (n===1?W/2:i/(n-1)*W), H-6-(v/mx)*(H-14) ]);
+  const line=pts.map(p=>p[0].toFixed(1)+","+p[1].toFixed(1)).join(" ");
+  const area=`0,${H} `+line+` ${W},${H}`;
+  const last=pts[pts.length-1];
+  return `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" style="width:100%;height:80px">
+    <defs><linearGradient id="ag" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#6C7BFF" stop-opacity=".35"/><stop offset="1" stop-color="#6C7BFF" stop-opacity="0"/></linearGradient></defs>
+    <line x1="0" y1="${H/2}" x2="${W}" y2="${H/2}" stroke="#23263A" stroke-width="1"/>
+    <polygon points="${area}" fill="url(#ag)"/>
+    <polyline points="${line}" fill="none" stroke="#6C7BFF" stroke-width="2.2" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${last[0].toFixed(1)}" cy="${last[1].toFixed(1)}" r="3.5" fill="#43E0D8"/></svg>`;
+}
+
+/* ── OVERVIEW ── */
+function renderOverview(d){
+  const cats=d.categories||[];
+  const body=document.getElementById("ovBody");
+  if(!cats.length){
+    body.innerHTML=`<div class="card"><div class="eyebrow">Расходы по категориям</div>
+      <div class="donut-wrap"><div class="donut">${donutSVG([],0)}<div class="donut-center"><div class="lbl">Потрачено</div><div class="big num">0</div><div class="sub">из ${num(d.budget)}</div></div></div></div></div>
+      <div class="empty"><span class="e">📭</span>Пока пусто — добавь первую трату через ＋</div>`;
+    return;
+  }
+  const top=cats.slice(0,5), rest=cats.slice(5);
+  let legend=top.map((c,i)=>`<div class="lg" data-i="${i}"><span class="sw" style="background:${CAT_COLOR[c.category]}"></span><span class="nm">${c.emoji} ${esc(c.category)}</span><span class="pc num">${Math.round(c.share)}%</span></div>`).join("");
+  if(rest.length){const rs=rest.reduce((a,c)=>a+c.share,0);legend+=`<div class="lg muted"><span class="sw" style="background:#3a3f5c"></span><span class="nm">+${rest.length} ещё</span><span class="pc num">${Math.round(rs)}%</span></div>`;}
+  const a=d.analytics||{};
+  const remTxt=d.warning?`<span class="dang">Превышено ${num(Math.max(0,d.spent-d.budget))}</span>`:`<span class="pos">Остаётся ${num(d.remaining)}</span>`;
+  const pace=a.days_left>0?`🔥 темп ${num(a.burn)}/д · 🛟 норма ≤ ${num(a.safe_daily)}/д`:`🔥 темп ${num(a.burn)}/д`;
+  let insight="";
+  if(d.is_current && a.projection!=null){
+    const over=a.proj_delta>0;
+    insight=`<div class="insight"><span class="ic">🔮</span><div>Прогноз к концу месяца <b>≈ ${moneyShort(a.projection)}</b> · ${Math.round(a.proj_pct)}% бюджета<br><span class="${over?'warn':'pos'}">${over?'⚠️ перерасход +'+num(a.proj_delta):'✅ уложишься, запас '+num(-a.proj_delta)}</span></div></div>`;
+  }
+  body.innerHTML=`
+    <div class="card"><div class="eyebrow">Расходы по категориям</div>
+      <div class="donut-wrap">
+        <div class="donut" id="donutBox">${donutSVG(cats,d.spent)}<div class="donut-center" id="donutCenter"><div class="lbl">Потрачено</div><div class="big num">${moneyShort(d.spent)}</div><div class="sub">из ${num(d.budget)}</div></div></div>
+        <div class="legend" id="legend">${legend}</div>
+      </div>
+    </div>
+    <div class="card"><div class="row sp" style="margin-bottom:12px"><div class="eyebrow" style="margin:0">Бюджет</div><span class="pill" style="background:${zoneColor(d.percent)}22;color:${zoneColor(d.percent)}">${Math.round(d.percent)}%</span></div>
+      <div class="gauge-wrap">
+        <div class="gauge" id="gaugeBox">${gaugeSVG(d.percent)}<div class="read"><b class="num" style="color:${zoneColor(d.percent)}">${Math.round(d.percent)}</b><i>%</i></div></div>
+        <div class="gmeta"><div class="l"><span class="muted">Потрачено</span><b class="num">${num(d.spent)}</b></div><div class="l"><span class="muted">Бюджет</span><b class="num">${num(d.budget)}</b></div><div>${remTxt}</div><div class="pace">${pace}</div></div>
+      </div>
+    </div>
+    ${insight}
+    <div class="card"><div class="row sp" style="margin-bottom:10px"><div class="eyebrow" style="margin:0">Недавние</div><span class="muted" style="font-size:12px;cursor:pointer" id="seeAll">Все ›</span></div><div id="recent"></div></div>`;
+  // donut interaction
+  const box=document.getElementById("donutBox");animateDonut(box);
+  const center=document.getElementById("donutCenter");
+  let selected=null;
+  function selectCat(i){
+    const segs=box.querySelectorAll(".seg"),legs=document.querySelectorAll("#legend .lg");
+    if(selected===i){selected=null;segs.forEach(s=>{s.style.opacity=1;s.setAttribute("stroke-width","13")});legs.forEach(l=>l.classList.remove("dim"));center.innerHTML=`<div class="lbl">Потрачено</div><div class="big num">${moneyShort(d.spent)}</div><div class="sub">из ${num(d.budget)}</div>`;return;}
+    selected=i;haptic("sel");
+    segs.forEach(s=>{const si=+s.dataset.i;s.style.opacity=si===i?1:.35;s.setAttribute("stroke-width",si===i?"16":"13");});
+    legs.forEach((l,li)=>l.classList.toggle("dim",li!==i));
+    const c=cats[i];center.innerHTML=`<div class="lbl">${c.emoji} ${esc(c.category)}</div><div class="big num">${moneyShort(c.total)}</div><div class="sub">${Math.round(c.share)}% · ${c.count}</div>`;
+  }
+  box.querySelectorAll(".seg").forEach(s=>s.addEventListener("click",()=>selectCat(+s.dataset.i)));
+  document.querySelectorAll("#legend .lg[data-i]").forEach(l=>l.addEventListener("click",()=>selectCat(+l.dataset.i)));
+  animateGauge(document.getElementById("gaugeBox"));
+  document.getElementById("seeAll").onclick=()=>switchTab("transactions");
+  // recent
+  const rec=TXS.slice(0,3);
+  document.getElementById("recent").innerHTML = rec.length? rec.map(txMini).join("") : `<div class="muted" style="font-size:12.5px">Сегодня трат нет</div>`;
+}
+function txMini(t){return `<div class="row sp" style="padding:6px 0"><span style="font-size:13px">${t.emoji} ${esc(t.merchant||t.category)}</span><b class="num" style="font-size:13px">−${num(t.amount)}</b></div>`;}
+
+/* ── TRANSACTIONS ── */
+function renderTxChips(){
+  const rail=document.getElementById("txChips");
+  const cats=Object.keys(CAT_EMOJI);
+  rail.innerHTML=`<div class="chip ${!TXFILTER.cat?'on':''}" data-c="">Все</div>`+cats.map(c=>`<div class="chip ${TXFILTER.cat===c?'on':''}" data-c="${c}">${CAT_EMOJI[c]}</div>`).join("");
+  rail.querySelectorAll(".chip").forEach(ch=>ch.onclick=()=>{TXFILTER.cat=ch.dataset.c||null;haptic("sel");renderTxChips();renderTxList();});
+}
+function renderTxList(){
+  const body=document.getElementById("txBody");
+  let list=TXS.slice();
+  if(TXFILTER.cat)list=list.filter(t=>t.category===TXFILTER.cat);
+  if(TXFILTER.q){const q=TXFILTER.q.toLowerCase();list=list.filter(t=>((t.merchant||"")+" "+(t.description||"")+" "+t.category).toLowerCase().includes(q));}
+  document.getElementById("txCount").textContent=TXS.length?TXS.length+" операций":"";
+  if(!list.length){body.innerHTML=`<div class="empty"><span class="e">📭</span>${TXS.length?'Ничего не найдено':'Пока пусто — добавь первую трату через ＋'}</div>`;return;}
+  // group by date
+  const groups={};list.forEach(t=>{(groups[t.purchase_date]=groups[t.purchase_date]||[]).push(t);});
+  const dates=Object.keys(groups).sort().reverse();
+  body.innerHTML=dates.map(dt=>{
+    const rows=groups[dt];const tot=rows.reduce((a,t)=>a+t.amount,0);
+    return `<div class="daygrp"><div class="dayhdr"><b>${dateLabel(dt)}</b><span class="tot num">−${num(tot)}</span></div><div class="txcard">${rows.map(txRow).join("")}</div></div>`;
+  }).join("");
+  bindSwipe();
+}
+function dateLabel(dt){
+  const d=new Date(dt+"T00:00:00"), today=new Date();today.setHours(0,0,0,0);
+  const diff=Math.round((today-d)/86400000);
+  if(diff===0)return "Сегодня";if(diff===1)return "Вчера";
+  if(diff>1&&diff<7)return WD[d.getDay()]+", "+d.getDate()+" "+MONTHS_GEN[d.getMonth()];
+  return d.getDate()+" "+MONTHS_GEN[d.getMonth()];
+}
+function txRow(t){
+  const col=CAT_COLOR[t.category]||"#8A90B0";
+  const meta=[t.category,t.description].filter(Boolean).join(" · ");
+  const src=SRC_EMOJI[t.input_type]||"";
+  return `<div class="txrow-wrap" data-id="${t.id}"><div class="del">🗑</div><div class="txrow">
+    <div class="ti" style="background:${col}24">${t.emoji}</div>
+    <div class="tx-mid"><div class="t1">${esc(t.merchant||t.category)}</div><div class="t2">${esc(meta)} ${src}</div></div>
+    <div class="tx-amt num">−${num(t.amount)}</div></div></div>`;
+}
+function esc(s){return (s||"").replace(/[<>&]/g,c=>({"<":"&lt;",">":"&gt;","&":"&amp;"}[c]));}
+function bindSwipe(){
+  document.querySelectorAll(".txrow-wrap").forEach(w=>{
+    const row=w.querySelector(".txrow");let sx=0,dx=0,drag=false;
+    row.addEventListener("touchstart",e=>{sx=e.touches[0].clientX;drag=true;row.style.transition="none";},{passive:true});
+    row.addEventListener("touchmove",e=>{if(!drag)return;dx=Math.min(0,Math.max(-72,e.touches[0].clientX-sx));row.style.transform=`translateX(${dx}px)`;},{passive:true});
+    row.addEventListener("touchend",()=>{drag=false;row.style.transition="";if(dx<-50){row.style.transform="translateX(-64px)";}else{row.style.transform="";}dx=0;});
+    w.querySelector(".del").onclick=()=>deleteTx(w.dataset.id);
+  });
+}
+async function deleteTx(id){
+  const t=TXS.find(x=>String(x.id)===String(id));if(!t)return;
+  TXS=TXS.filter(x=>String(x.id)!==String(id));renderTxList();haptic("impact","medium");
+  let undone=false;
+  toast("Удалено","Вернуть",()=>{undone=true;TXS.push(t);TXS.sort((a,b)=>(b.purchase_date.localeCompare(a.purchase_date))||((b.created_at||"").localeCompare(a.created_at||"")));renderTxList();},4000);
+  setTimeout(async()=>{if(undone)return;try{await api("/api/transactions/"+id,{method:"DELETE"});loadOverview();}catch(e){toast("Ошибка удаления");}},4100);
+}
+
+/* ── ANALYTICS ── */
+function renderAnalytics(d){
+  const body=document.getElementById("anBody");const a=d.analytics||{};const cats=d.categories||[];
+  if(!cats.length){body.innerHTML=`<div class="empty"><span class="e">📊</span>Нет данных за этот месяц</div>`;return;}
+  let fc="";
+  if(d.is_current&&a.projection!=null){const over=a.proj_delta>0;
+    fc=`<div class="card"><div class="eyebrow">Прогноз к концу месяца</div><div style="font-size:26px;font-weight:800" class="num">≈ ${num(a.projection)}</div><div class="muted" style="font-size:12px;margin:3px 0 8px">${Math.round(a.proj_pct)}% бюджета</div><div class="${over?'warn':'pos'}" style="font-weight:700;font-size:13px">${over?'⚠️ перерасход +'+num(a.proj_delta):'✅ уложишься −'+num(-a.proj_delta)}</div></div>`;}
+  let mom="";
+  if(a.mom_delta_pct!=null){const p=a.mom_delta_pct;const cls=Math.abs(p)<=3?'muted':(p<0?'pos':'dang');const ar=Math.abs(p)<=3?'▪️ ровно':(p<0?'🟢 ↓'+Math.abs(Math.round(p))+'%':'🔴 ↑'+Math.abs(Math.round(p))+'%');mom=`<span class="pill ${cls}" style="background:var(--surface-2)">${ar}</span>`;}
+  const trend=(a.trend30&&a.trend30.length)?a.trend30:(a.sparkline||[]);
+  const total=cats.reduce((s,c)=>s+c.total,0)||1;
+  const stack=cats.map(c=>`<div style="flex:${c.total};background:${CAT_COLOR[c.category]}"></div>`).join("");
+  const bars=cats.map(c=>`<div class="bar"><div class="nm">${c.emoji} ${esc(c.category)}</div><div class="track"><div class="fill" style="width:${c.share}%;background:${CAT_COLOR[c.category]}"></div></div><div class="pc num">${Math.round(c.share)}%</div></div>`).join("");
+  body.innerHTML=`${fc}
+    <div class="card"><div class="row sp" style="margin-bottom:12px"><div class="eyebrow" style="margin:0">Куда уходят деньги</div>${mom}</div>
+      <div class="stack">${stack}</div>${bars}</div>
+    <div class="card"><div class="eyebrow">Динамика · ${trend.length} дн</div>${trendSVG(trend)}</div>
+    <div class="kpis"><div class="kpi"><div class="v num">${moneyShort(a.avg_ticket)}</div><div class="k">средний чек</div></div>
+      <div class="kpi"><div class="v num">${a.n_total||0}</div><div class="k">операций</div></div>
+      <div class="kpi"><div class="v num">${num(d.spent)}</div><div class="k">всего</div></div></div>`;
+}
+
+/* ── PROFILE ── */
+function renderProfile(){
+  const body=document.getElementById("prBody");
+  body.innerHTML=`
+    <div class="card"><div class="eyebrow">Бюджет</div>
+      <div class="row sp" style="margin-bottom:12px"><span class="muted" style="font-size:13px">Текущий</span><b class="num">${money(BUDGET)}</b></div>
+      <div class="seg" id="budSeg"><button data-v="3000000">3 млн</button><button data-v="5000000">5 млн</button><button data-v="8000000">8 млн</button><button data-v="custom">Своя</button></div>
+    </div>
+    <div class="card"><div class="eyebrow">Язык</div><div class="seg" id="langSeg"><button data-v="ru" class="${LANG==='ru'?'on':''}">🇷🇺 RU</button><button data-v="en" class="${LANG==='en'?'on':''}">🇬🇧 EN</button></div></div>
+    <button class="listbtn" id="tipsBtn">💡 Советы по экономии <span>›</span></button>
+    <button class="listbtn" id="csvBtn">⬇️ Экспорт CSV <span>›</span></button>
+    <button class="listbtn dz" id="resetBtn">🗑 Сбросить все траты <span>›</span></button>
+    <div id="tipsBox"></div>`;
+  document.querySelectorAll("#budSeg button").forEach(b=>b.onclick=async()=>{
+    haptic("sel");
+    if(b.dataset.v==="custom"){const v=prompt("Введи бюджет, сум:");if(!v)return;const n=parseFloat(v.replace(/\D/g,""));if(!n)return;await setBudget(n);}
+    else await setBudget(+b.dataset.v);
+  });
+  document.querySelectorAll("#langSeg button").forEach(b=>b.onclick=async()=>{LANG=b.dataset.v;haptic("sel");try{await api("/api/language",{method:"POST",body:{language:LANG}});}catch(e){}renderProfile();});
+  document.getElementById("tipsBtn").onclick=async()=>{const box=document.getElementById("tipsBox");box.innerHTML=`<div class="card sk" style="height:80px"></div>`;try{const r=await api("/api/tips");box.innerHTML=r.tips?`<div class="card" style="white-space:pre-wrap;font-size:13px;line-height:1.5">${esc(r.tips)}</div>`:`<div class="empty">Нет данных для советов</div>`;}catch(e){box.innerHTML=`<div class="empty">Ошибка</div>`;}};
+  document.getElementById("csvBtn").onclick=exportCSV;
+  document.getElementById("resetBtn").onclick=async()=>{if(!confirm("Удалить ВСЕ траты? Это необратимо."))return;try{await api("/api/reset",{method:"POST"});haptic("notif","warning");TXS=[];loadOverview();toast("Все траты удалены");switchTab("overview");}catch(e){toast("Ошибка");}};
+}
+async function setBudget(n){try{await api("/api/budget",{method:"POST",body:{amount:n}});BUDGET=n;haptic("notif");toast("Бюджет: "+money(n));renderProfile();loadOverview();}catch(e){toast("Ошибка");}}
+function exportCSV(){
+  const rows=[["date","category","amount","merchant","note","source"]].concat(TXS.map(t=>[t.purchase_date,t.category,t.amount,t.merchant||"",(t.description||"").replace(/[\n,]/g," "),t.input_type]));
+  const csv=rows.map(r=>r.join(",")).join("\n");
+  const a=document.createElement("a");a.href="data:text/csv;charset=utf-8,"+encodeURIComponent(csv);a.download="transactions.csv";a.click();haptic("impact");
+}
+
+/* ── ADD SHEET ── */
+let SEL_CAT=null;
+function openSheet(){
+  document.getElementById("sheet").classList.add("open");haptic("impact","light");
+  document.getElementById("pdate").value=monthKey(0)+"-"+String(new Date().getDate()).padStart(2,"0");
+  if(TG&&TG.BackButton){TG.BackButton.show();TG.BackButton.onClick(closeSheet);}
+  setTimeout(()=>document.getElementById("amt").focus(),300);
+}
+function closeSheet(){
+  document.getElementById("sheet").classList.remove("open");
+  document.getElementById("amt").value="";document.getElementById("note").value="";document.getElementById("qaInput").value="";
+  SEL_CAT=null;renderCatChips();updateSubmit();
+  if(TG&&TG.BackButton)TG.BackButton.hide();
+  if(TG&&TG.MainButton)TG.MainButton.hide();
+}
+function renderCatChips(){
+  document.getElementById("catChips").innerHTML=Object.keys(CAT_EMOJI).map(c=>{
+    const col=CAT_COLOR[c],on=SEL_CAT===c;
+    return `<div class="cchip" data-c="${c}" style="${on?`background:${col};border-color:transparent;color:#0A0B12`:''}"><span class="e">${CAT_EMOJI[c]}</span><span class="nm">${c}</span></div>`;
+  }).join("");
+  document.querySelectorAll("#catChips .cchip").forEach(ch=>ch.onclick=()=>{SEL_CAT=ch.dataset.c;haptic("sel");renderCatChips();updateSubmit();});
+}
+function parseAmt(){return parseFloat((document.getElementById("amt").value||"").replace(/\D/g,""))||0;}
+function updateSubmit(){
+  const ok=parseAmt()>0&&SEL_CAT;
+  const btn=document.getElementById("submit");btn.disabled=!ok;
+  if(TG&&TG.MainButton){if(ok){TG.MainButton.setText("Записать · "+money(parseAmt()));TG.MainButton.show();TG.MainButton.enable();}else{TG.MainButton.hide();}}
+}
+async function submitTx(){
+  const amount=parseAmt();if(!amount||!SEL_CAT)return;
+  const note=document.getElementById("note").value.trim();
+  const pd=document.getElementById("pdate").value||null;
+  if(TG&&TG.MainButton)TG.MainButton.showProgress();
+  try{
+    await api("/api/transactions",{method:"POST",body:{amount,category:SEL_CAT,description:note,merchant:note,purchase_date:pd}});
+    haptic("notif","success");closeSheet();toast("Записано · "+money(amount));await reloadAll();
+  }catch(e){toast("Ошибка: "+e.message);}finally{if(TG&&TG.MainButton)TG.MainButton.hideProgress();}
+}
+async function quickAdd(){
+  const text=document.getElementById("qaInput").value.trim();if(!text)return;
+  document.getElementById("qaBtn").textContent="…";
+  try{const r=await api("/api/quick-add",{method:"POST",body:{text}});haptic("notif","success");closeSheet();toast("Записано · "+(r.parsed?money(r.parsed.amount):""));await reloadAll();}
+  catch(e){toast("Не понял — заполни вручную");}
+  finally{document.getElementById("qaBtn").textContent="→";}
+}
+
+/* ── data loading ── */
+async function loadOverview(){
+  try{
+    const d=await api("/api/overview?month="+monthKey(OFFSET));
+    OVERVIEW=d;BUDGET=d.budget;CUR=d.currency==="UZS"?"сум":(d.currency||"сум");
+    document.getElementById("mLabel").textContent=monthLabel(OFFSET);
+    renderOverview(d);
+  }catch(e){if(String(e.message).includes("401")||!INIT){showGate();}else{document.getElementById("ovBody").innerHTML=`<div class="empty">Ошибка загрузки</div>`;}}
+}
+async function loadTx(){
+  try{const r=await api("/api/transactions?month="+monthKey(OFFSET));TXS=r.transactions||[];renderTxChips();renderTxList();if(OVERVIEW)renderOverview(OVERVIEW);}catch(e){}
+}
+async function loadAnalytics(){
+  try{const d=await api("/api/overview?month="+monthKey(AN_OFFSET));document.getElementById("aLabel").textContent=monthLabel(AN_OFFSET);renderAnalytics(d);}catch(e){}
+}
+async function reloadAll(){await loadOverview();await loadTx();if(document.getElementById("s-analytics").classList.contains("active"))loadAnalytics();}
+
+/* ── nav ── */
+function switchTab(name){
+  document.querySelectorAll(".screen").forEach(s=>s.classList.remove("active"));
+  document.getElementById("s-"+name).classList.add("active");
+  document.querySelectorAll(".tab").forEach(t=>t.classList.toggle("on",t.dataset.tab===name));
+  haptic("sel");
+  if(name==="analytics")loadAnalytics();
+  if(name==="profile")renderProfile();
+  if(name==="transactions"&&!TXS.length)loadTx();
+  window.scrollTo(0,0);
+}
+function showGate(){document.getElementById("app").style.display="none";document.querySelector(".tabbar").style.display="none";document.getElementById("gate").style.display="flex";}
+
+/* ── init ── */
+function init(){
+  if(TG){try{TG.ready();TG.expand();}catch(e){}}
+  if(!INIT){showGate();return;}
+  // user
+  try{const u=TG&&TG.initDataUnsafe&&TG.initDataUnsafe.user;if(u){const nm=u.first_name||"друг";document.getElementById("hello").textContent="Привет, "+nm;document.getElementById("hello2").textContent=nm;const ini=(u.first_name||"🙂").charAt(0).toUpperCase();document.getElementById("ava").textContent=ini;document.getElementById("ava2").textContent=ini;}}catch(e){}
+  // tabs
+  document.querySelectorAll(".tab").forEach(t=>t.onclick=()=>switchTab(t.dataset.tab));
+  document.getElementById("fab").onclick=openSheet;
+  document.getElementById("scrim").onclick=closeSheet;
+  document.getElementById("submit").onclick=submitTx;
+  document.getElementById("qaBtn").onclick=quickAdd;
+  document.getElementById("amt").addEventListener("input",e=>{const v=e.target.value.replace(/\D/g,"");e.target.value=v?(+v).toLocaleString("ru-RU").replace(/,/g," "):"";updateSubmit();});
+  document.getElementById("txSearch").addEventListener("input",e=>{TXFILTER.q=e.target.value;renderTxList();});
+  document.getElementById("mPrev").onclick=()=>{OFFSET--;loadOverview();loadTx();};
+  document.getElementById("mNext").onclick=()=>{if(OFFSET<0){OFFSET++;loadOverview();loadTx();}};
+  document.getElementById("aPrev").onclick=()=>{AN_OFFSET--;loadAnalytics();};
+  document.getElementById("aNext").onclick=()=>{if(AN_OFFSET<0){AN_OFFSET++;loadAnalytics();}};
+  if(TG&&TG.MainButton)TG.MainButton.onClick(submitTx);
+  renderCatChips();
+  loadOverview();loadTx();
+}
+init();
+</script>
+</body>
+</html>

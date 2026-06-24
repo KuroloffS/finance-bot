@@ -1,12 +1,22 @@
 # 🚀 Деплой на Railway
 
-Бот работает в режиме **long-polling** — нужен один постоянно работающий процесс
-(тип `worker` в `Procfile`). Webhook не требуется. Конфиг уже готов:
-`requirements.txt`, `runtime.txt` (Python 3.12), `Procfile` (`worker`), `railway.json`
-(авто-перезапуск при сбое).
+Один процесс делает всё: Telegram-бот (long-polling) **+** веб-сервер (FastAPI/uvicorn),
+который отдаёт **Mini App** (тёмное приложение с аналитикой) по HTTPS. Тип процесса — `web`
+(`Procfile`), он слушает `$PORT`, который Railway выдаёт автоматически. Конфиг готов:
+`requirements.txt`, `runtime.txt` (Python 3.12), `Procfile` (`web`), `railway.json`.
 
-> ⚠️ **Важно:** у Telegram-бота может опрашивать обновления только ОДИН процесс.
-> Перед запуском на Railway **останови локального бота** (иначе будет ошибка `409 Conflict`).
+> ⚠️ **Важно:** опрашивать бота может только ОДИН процесс. Перед запуском на Railway
+> **останови локального бота** (иначе `409 Conflict`).
+
+## 📱 Чтобы заработал Mini App (обязательно)
+1. В сервисе Railway → **Settings → Networking → Generate Domain** — получишь адрес вида
+   `https://finance-bot-production.up.railway.app`.
+2. Railway сам прокинет переменную `RAILWAY_PUBLIC_DOMAIN`, и бот возьмёт её автоматически —
+   **либо** задай переменную `WEBAPP_URL` = этот `https://…` адрес вручную.
+3. После редеплоя бот выставит кнопку-меню «💼 Финансы» (рядом с полем ввода) и кнопку
+   «📱 Открыть приложение» в `/start` и `/app`. Tap → откроется тёмное приложение.
+
+> Telegram Mini Apps работают только по HTTPS — домен Railway уже https, всё ок.
 
 ---
 
@@ -41,12 +51,15 @@
 | `DEFAULT_CURRENCY` | `UZS` |
 | `DEFAULT_MONTHLY_BUDGET` | `5000000` |
 | `DEFAULT_LANGUAGE` | `ru` |
+| `WEBAPP_URL` | (опц.) `https://…up.railway.app` — для Mini App; можно не задавать, если домен сгенерирован (см. раздел 📱 выше) |
 
-> **Не** задавай `WEBHOOK_URL` и `PORT` — без `WEBHOOK_URL` бот сам выберет polling.
+> `PORT` задаёт Railway сам — не трогай. `RAILWAY_PUBLIC_DOMAIN` подставляется
+> автоматически после генерации домена, и бот возьмёт адрес Mini App из неё.
 
 ### 5. Готово
-Railway пересоберёт проект и запустит бота. Логи — во вкладке **Deployments → Logs**.
-Должно появиться: `Application started`. Открой бота в Telegram → `/start`.
+Railway пересоберёт проект и запустит бота + веб-сервер. Логи — во вкладке **Deployments → Logs**.
+Должно появиться: `Bot polling + web server on port …` и `Menu button → Mini App at https://…`.
+Открой бота в Telegram → `/start` → нажми «📱 Открыть приложение».
 
 При следующем `git push` Railway задеплоит обновление автоматически.
 
@@ -67,9 +80,9 @@ Railway пересоберёт проект и запустит бота. Лог
 
 ---
 
-## Переход на webhook (опционально, позже)
-Polling проще и работает сразу. Если захочешь webhook (эффективнее под нагрузкой):
-1. В Railway включи публичный домен (Settings → Networking → Generate Domain).
-2. Добавь переменную `WEBHOOK_URL` = выданный `https://...up.railway.app`.
-3. Смени `Procfile` на `web: python main.py` и закоммить.
-`main.py` сам переключится на webhook, когда увидит `WEBHOOK_URL`.
+## Как это устроено
+- `main.py` поднимает в одном процессе: бот (long-polling) + FastAPI/uvicorn (порт `$PORT`).
+- Веб-сервер отдаёт Mini App (`web/static/index.html`) и JSON-API (`/api/*`).
+- Каждый запрос `/api/*` проверяет подпись Telegram `initData` (HMAC по токену) — личность
+  берётся только из проверенных данных, чужие данные недоступны.
+- Бот и приложение пишут в одну базу Supabase — данные всегда синхронны.
