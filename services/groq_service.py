@@ -1,0 +1,292 @@
+import asyncio
+import base64
+import json
+import logging
+import os
+import re
+import tempfile
+import time
+
+from groq import Groq
+
+logger = logging.getLogger(__name__)
+
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+# --- Models (verified live against Groq API, June 2026) ---
+TEXT_MODEL = "llama-3.3-70b-versatile"          # smart parsing & categorization
+VISION_MODEL = "meta-llama/llama-4-scout-17b-16e-instruct"  # multimodal receipt OCR
+WHISPER_MODEL = "whisper-large-v3"              # voice / audio transcription
+
+CATEGORIES = [
+    "Продукты",
+    "Кафе и рестораны",
+    "Транспорт",
+    "Жильё и коммуналка",
+    "Здоровье",
+    "Развлечения",
+    "Шоппинг",
+    "Работа и бизнес",
+    "Другое",
+]
+
+_FALLBACK = {
+    "amount": 0,
+    "category": "Другое",
+    "merchant": None,
+    "description": "",
+    "advice": "",
+}
+
+
+def _to_float(value) -> float:
+    """Robustly convert '45 000', '45,000', '45000.50', 45000 → float."""
+    if value is None:
+        return 0.0
+    if isinstance(value, (int, float)):
+        return float(value)
+    s = str(value).strip()
+    # keep digits, dot and comma; drop spaces and currency words
+    s = re.sub(r"[^\d.,]", "", s)
+    if not s:
+        return 0.0
+    # if both separators present, assume comma = thousands
+    if "," in s and "." in s:
+        s = s.replace(",", "")
+    elif "," in s:
+        # comma as decimal only if it looks like decimals (1-2 trailing digits)
+        if re.search(r",\d{1,2}$", s):
+            s = s.replace(",", ".")
+        else:
+            s = s.replace(",", "")
+    try:
+        return float(s)
+    except ValueError:
+        return 0.0
+
+
+def _extract_json(raw: str) -> dict:
+    raw = raw.strip()
+    raw = re.sub(r"^```(?:json)?\s*", "", raw, flags=re.MULTILINE)
+    raw = re.sub(r"\s*```$", "", raw, flags=re.MULTILINE).strip()
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        match = re.search(r"\{.*\}", raw, re.DOTALL)
+        if match:
+            return json.loads(match.group())
+        raise
+
+
+def _normalize(result: dict, default_desc: str) -> dict:
+    result.setdefault("amount", 0)
+    result.setdefault("category", "Другое")
+    result.setdefault("merchant", None)
+    result.setdefault("description", default_desc)
+    result.setdefault("advice", "")
+    if result["category"] not in CATEGORIES:
+        result["category"] = "Другое"
+    result["amount"] = _to_float(result["amount"])
+    if isinstance(result.get("merchant"), str) and not result["merchant"].strip():
+        result["merchant"] = None
+    return result
+
+
+async def parse_text_purchase(text: str, user_context: dict) -> dict:
+    lang = user_context.get("language", "ru")
+    budget = user_context.get("monthly_budget", 5_000_000)
+    spent = user_context.get("spent_this_month", 0)
+    categories_str = ", ".join(CATEGORIES)
+
+    if lang == "ru":
+        system_prompt = (
+            "Ты — внимательный финансовый помощник. Извлеки данные о трате из сообщения.\n"
+            "Валюта: узбекские сумы (UZS). Суммы словами («двадцать пять тысяч», «полтора миллиона») "
+            "переводи в целое число сум.\n"
+            f"Контекст: месячный бюджет {budget:.0f} сум, уже потрачено {spent:.0f} сум.\n"
+            f"Категория — строго одна из: {categories_str}.\n"
+            "Если в сообщении нет траты или суммы — верни amount = 0.\n"
+            "Поле merchant — название магазина/заведения, если упомянуто, иначе null.\n"
+            "advice — один короткий практичный совет по этой трате (одно предложение, по-дружески).\n"
+            'Ответь строго JSON: {"amount": <число>, "category": "<категория>", '
+            '"merchant": "<строка|null>", "description": "<краткое описание траты>", "advice": "<совет>"}'
+        )
+    else:
+        system_prompt = (
+            "You are an attentive financial assistant. Extract purchase data from the message.\n"
+            "Currency: Uzbek sum (UZS). Convert worded amounts into integer sum.\n"
+            f"Context: monthly budget {budget:.0f} sum, already spent {spent:.0f} sum.\n"
+            f"Category — strictly one of: {categories_str}.\n"
+            "If there is no purchase or amount — return amount = 0.\n"
+            "merchant — store/place name if mentioned, otherwise null.\n"
+            "advice — one short practical tip about this purchase (single friendly sentence).\n"
+            'Reply strictly JSON: {"amount": <number>, "category": "<category>", '
+            '"merchant": "<string|null>", "description": "<short description>", "advice": "<tip>"}'
+        )
+
+    raw = ""
+    try:
+        def _call():
+            return client.chat.completions.create(
+                model=TEXT_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text},
+                ],
+                temperature=0.1,
+                max_tokens=300,
+                response_format={"type": "json_object"},
+            )
+
+        response = await asyncio.to_thread(_call)
+        raw = response.choices[0].message.content
+        logger.info("parse_text -> %s", raw[:200])
+        return _normalize(_extract_json(raw), text)
+    except Exception as e:
+        logger.error("parse_text_purchase error: %s | raw=%s", e, raw[:300])
+        return {**_FALLBACK, "description": text}
+
+
+async def transcribe_audio(audio_bytes: bytes, filename: str = "audio.ogg") -> str:
+    """Transcribe voice/audio. Groq Whisper accepts OGG/MP3/M4A directly — no ffmpeg needed.
+    Language is auto-detected (handles Russian + Uzbek)."""
+    suffix = os.path.splitext(filename)[1] or ".ogg"
+    tmp_path = os.path.join(tempfile.gettempdir(), f"audio_{int(time.time())}{suffix}")
+    try:
+        with open(tmp_path, "wb") as f:
+            f.write(audio_bytes)
+
+        def _transcribe():
+            with open(tmp_path, "rb") as f:
+                return client.audio.transcriptions.create(
+                    file=(os.path.basename(tmp_path), f),
+                    model=WHISPER_MODEL,
+                )
+
+        transcription = await asyncio.to_thread(_transcribe)
+        text = (transcription.text or "").strip()
+        logger.info("transcribe_audio -> %s", text[:120])
+        return text
+    except Exception as e:
+        logger.error("transcribe_audio error: %s", e)
+        return ""
+    finally:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+
+
+# Backward-compatible alias
+async def transcribe_voice(ogg_bytes: bytes) -> str:
+    return await transcribe_audio(ogg_bytes, "voice.ogg")
+
+
+async def parse_photo_receipt(image_bytes: bytes, user_context: dict) -> dict:
+    raw = ""
+    try:
+        if image_bytes[:2] == b"\xff\xd8":
+            mime_type = "image/jpeg"
+        elif image_bytes[:4] == b"\x89PNG":
+            mime_type = "image/png"
+        elif image_bytes[:4] == b"RIFF" and image_bytes[8:12] == b"WEBP":
+            mime_type = "image/webp"
+        else:
+            mime_type = "image/jpeg"
+
+        b64 = base64.b64encode(image_bytes).decode("utf-8")
+        lang = user_context.get("language", "ru")
+        categories_str = ", ".join(CATEGORIES)
+
+        if lang == "ru":
+            prompt_text = (
+                "На фото чек, квитанция или ценник. Извлеки ИТОГОВУЮ сумму к оплате "
+                "(только число, без пробелов и валюты), название магазина/заведения "
+                f"и категорию строго из списка: {categories_str}. "
+                "Если итог не виден — посчитай сумму позиций. "
+                "Ответь строго JSON без markdown: "
+                '{"amount": <число>, "category": "<категория>", "merchant": "<строка|null>", '
+                '"description": "<что куплено>", "advice": "<короткий совет>"}'
+            )
+        else:
+            prompt_text = (
+                "The photo is a receipt or price tag. Extract the TOTAL amount due "
+                "(number only, no spaces/currency), the store/place name, "
+                f"and a category strictly from: {categories_str}. "
+                "Reply strictly JSON, no markdown: "
+                '{"amount": <number>, "category": "<category>", "merchant": "<string|null>", '
+                '"description": "<what was bought>", "advice": "<short tip>"}'
+            )
+
+        def _call():
+            return client.chat.completions.create(
+                model=VISION_MODEL,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image_url",
+                                "image_url": {"url": f"data:{mime_type};base64,{b64}"},
+                            },
+                            {"type": "text", "text": prompt_text},
+                        ],
+                    }
+                ],
+                temperature=0.1,
+                max_tokens=600,
+                response_format={"type": "json_object"},
+            )
+
+        response = await asyncio.to_thread(_call)
+        raw = response.choices[0].message.content
+        logger.info("parse_photo -> %s", raw[:200])
+        return _normalize(_extract_json(raw), "Чек")
+    except Exception as e:
+        logger.error("parse_photo_receipt error: %s | raw=%s", e, raw[:300])
+        return {**_FALLBACK, "description": "Чек"}
+
+
+async def get_savings_tips(monthly_data: list, language: str) -> str:
+    if not monthly_data:
+        return ""
+
+    total = sum(_to_float(r.get("total_spent")) for r in monthly_data)
+    lines = []
+    for row in sorted(monthly_data, key=lambda x: _to_float(x.get("total_spent")), reverse=True):
+        amt = _to_float(row.get("total_spent"))
+        share = (amt / total * 100) if total else 0
+        lines.append(
+            f"- {row['category']}: {amt:,.0f} сум ({share:.0f}% трат, {row.get('num_transactions', 0)} операций)".replace(",", " ")
+        )
+    data_str = "\n".join(lines)
+
+    if language == "ru":
+        prompt = (
+            f"Расходы пользователя за месяц (всего {total:,.0f} сум):\n{data_str}\n\n"
+            "Дай ровно 3 коротких конкретных совета по экономии — с цифрами и реальными шагами, "
+            "опираясь на самые крупные категории. Пиши по-дружески, без воды. "
+            "Каждый совет — с новой строки, начни с эмодзи."
+        ).replace(",", " ")
+    else:
+        prompt = (
+            f"User's monthly expenses (total {total:,.0f} sum):\n{data_str}\n\n"
+            "Give exactly 3 short, specific savings tips with numbers and concrete steps, "
+            "focused on the largest categories. Friendly tone, no fluff. "
+            "Each tip on a new line, starting with an emoji."
+        ).replace(",", " ")
+
+    try:
+        def _call():
+            return client.chat.completions.create(
+                model=TEXT_MODEL,
+                messages=[{"role": "user", "content": prompt}],
+                temperature=0.4,
+                max_tokens=700,
+            )
+
+        response = await asyncio.to_thread(_call)
+        return (response.choices[0].message.content or "").strip()
+    except Exception as e:
+        logger.error("get_savings_tips error: %s", e)
+        return ""
