@@ -6,7 +6,8 @@ from telegram import (
     WebAppInfo,
 )
 
-from utils.formatters import CATEGORY_EMOJI, format_amount
+from services.currency_service import CURRENCIES
+from utils.formatters import CATEGORY_EMOJI, format_amount, goal_progress
 
 
 def webapp_keyboard(url: str, lang: str = "ru") -> InlineKeyboardMarkup:
@@ -22,6 +23,7 @@ MENU = {
     "ru": {
         "analytics": "📊 Аналитика",
         "history": "📋 История",
+        "goals": "🎯 Цели",
         "budget": "💰 Бюджет",
         "tips": "💡 Советы",
         "undo": "↩️ Отменить",
@@ -30,6 +32,7 @@ MENU = {
     "en": {
         "analytics": "📊 Analytics",
         "history": "📋 History",
+        "goals": "🎯 Goals",
         "budget": "💰 Budget",
         "tips": "💡 Tips",
         "undo": "↩️ Undo",
@@ -42,8 +45,8 @@ def main_menu_keyboard(lang: str = "ru") -> ReplyKeyboardMarkup:
     m = MENU.get(lang, MENU["ru"])
     rows = [
         [KeyboardButton(m["analytics"]), KeyboardButton(m["history"])],
-        [KeyboardButton(m["budget"]), KeyboardButton(m["tips"])],
-        [KeyboardButton(m["undo"]), KeyboardButton(m["more"])],
+        [KeyboardButton(m["goals"]), KeyboardButton(m["budget"])],
+        [KeyboardButton(m["tips"]), KeyboardButton(m["more"])],
     ]
     placeholder = "Напиши трату или выбери действие…" if lang == "ru" else "Type a purchase or pick an action…"
     return ReplyKeyboardMarkup(
@@ -148,16 +151,121 @@ def budget_presets_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
 
 def more_menu_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
     if lang == "ru":
+        cur, notif = "💱 Валюта", "🔔 Уведомления"
         langtg, reset, help_ = "🌐 RU / EN", "🗑 Сбросить всё", "ℹ️ Помощь"
     else:
+        cur, notif = "💱 Currency", "🔔 Notifications"
         langtg, reset, help_ = "🌐 RU / EN", "🗑 Reset all", "ℹ️ Help"
     return InlineKeyboardMarkup(
         [
+            [InlineKeyboardButton(cur, callback_data="more:currency"),
+             InlineKeyboardButton(notif, callback_data="more:settings")],
             [InlineKeyboardButton(langtg, callback_data="lang:toggle")],
             [InlineKeyboardButton(reset, callback_data="reset:ask")],
             [InlineKeyboardButton(help_, callback_data="more:help")],
         ]
     )
+
+
+# ───────────────────────── Savings goals ─────────────────────────
+
+def _trunc(s: str, n: int = 22) -> str:
+    s = str(s or "")
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
+def goals_list_keyboard(goals: list, lang: str = "ru") -> InlineKeyboardMarkup:
+    """One button per goal (emoji · title · progress) + a 'new goal' button."""
+    rows = []
+    for g in goals:
+        p = goal_progress(g)
+        badge = "🏆" if p["done"] else f"{p['percent']:.0f}%"
+        emoji = g.get("emoji") or "🎯"
+        label = f"{emoji} {_trunc(g.get('title', ''))} · {badge}"
+        rows.append([InlineKeyboardButton(label, callback_data=f"goal:open:{g['id']}")])
+    new_lbl = "➕ Новая цель" if lang == "ru" else "➕ New goal"
+    rows.append([InlineKeyboardButton(new_lbl, callback_data="goal:new")])
+    return InlineKeyboardMarkup(rows)
+
+
+def goal_detail_keyboard(goal: dict, lang: str = "ru") -> InlineKeyboardMarkup:
+    p = goal_progress(goal)
+    gid = goal["id"]
+    if lang == "ru":
+        add, fill = "💰 Пополнить", "🎉 Закрыть цель"
+        dl, dele, back = "✏️ Срок", "🗑 Удалить", "‹ К целям"
+    else:
+        add, fill = "💰 Top up", "🎉 Complete it"
+        dl, dele, back = "✏️ Deadline", "🗑 Delete", "‹ Goals"
+    rows = [[InlineKeyboardButton(add, callback_data=f"goal:add:{gid}")]]
+    if not p["done"] and p["remaining"] > 0:
+        rows.append([InlineKeyboardButton(fill, callback_data=f"goal:fill:{gid}")])
+    rows.append([
+        InlineKeyboardButton(dl, callback_data=f"goal:editdl:{gid}"),
+        InlineKeyboardButton(dele, callback_data=f"goal:del:{gid}"),
+    ])
+    rows.append([InlineKeyboardButton(back, callback_data="goal:list")])
+    return InlineKeyboardMarkup(rows)
+
+
+def goal_delete_confirm_keyboard(goal_id, lang: str = "ru") -> InlineKeyboardMarkup:
+    if lang == "ru":
+        yes, no = "✅ Да, удалить", "❌ Отмена"
+    else:
+        yes, no = "✅ Yes, delete", "❌ Cancel"
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(yes, callback_data=f"goal:delyes:{goal_id}")],
+        [InlineKeyboardButton(no, callback_data=f"goal:open:{goal_id}")],
+    ])
+
+
+# ───────────────────────── Currency picker ─────────────────────────
+
+def currency_keyboard(current: str = "UZS", lang: str = "ru") -> InlineKeyboardMarkup:
+    """Grid of supported currencies; the active one gets a ✓."""
+    rows, row = [], []
+    for code, meta in CURRENCIES.items():
+        mark = "✓ " if code == current else ""
+        label = f"{mark}{meta['flag']} {code}"
+        row.append(InlineKeyboardButton(label, callback_data=f"cur:{code}"))
+        if len(row) == 2:
+            rows.append(row)
+            row = []
+    if row:
+        rows.append(row)
+    return InlineKeyboardMarkup(rows)
+
+
+# ───────────────────────── Notification settings ─────────────────────────
+
+# Display order + labels for the toggle list. Keys match DEFAULT_NOTIFY.
+NOTIFY_ORDER = ["budget_alerts", "large_tx", "weekly_summary", "daily_digest", "goal_reminders"]
+NOTIFY_LABELS = {
+    "ru": {
+        "budget_alerts": "Бюджет: 80% и 100%",
+        "large_tx": "Крупные траты",
+        "weekly_summary": "Итоги недели",
+        "daily_digest": "Итоги дня",
+        "goal_reminders": "Напоминания о целях",
+    },
+    "en": {
+        "budget_alerts": "Budget: 80% & 100%",
+        "large_tx": "Large purchases",
+        "weekly_summary": "Weekly summary",
+        "daily_digest": "Daily wrap-up",
+        "goal_reminders": "Goal reminders",
+    },
+}
+
+
+def settings_keyboard(settings: dict, lang: str = "ru") -> InlineKeyboardMarkup:
+    labels = NOTIFY_LABELS.get(lang, NOTIFY_LABELS["ru"])
+    rows = []
+    for key in NOTIFY_ORDER:
+        on = bool(settings.get(key))
+        mark = "✅" if on else "⬜️"
+        rows.append([InlineKeyboardButton(f"{mark} {labels[key]}", callback_data=f"nset:{key}")])
+    return InlineKeyboardMarkup(rows)
 
 
 def reset_confirm_keyboard(lang: str) -> InlineKeyboardMarkup:

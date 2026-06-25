@@ -8,7 +8,8 @@ TEXTS = {
             "⌨️ <b>Текстом</b> — «такси 25 000»\n"
             "🎤 <b>Голосом</b> — наговори покупку\n"
             "📸 <b>Фото</b> — пришли чек\n\n"
-            "Я запишу, разложу по категориям и дам совет 🤝\n\n"
+            "Я запишу, разложу по категориям и дам совет 🤝\n"
+            "🎯 А ещё помогу копить на цели и подскажу, когда пора притормозить.\n\n"
             "👇 А кнопки внизу — для всего остального."
         ),
         "help_text": (
@@ -17,12 +18,16 @@ TEXTS = {
             "⌨️ <b>Текст:</b> «потратил 50 000 на такси»\n"
             "🎤 <b>Голос:</b> запиши голосовое о трате\n"
             "📸 <b>Фото:</b> сфотографируй чек\n"
-            "🎧 <b>Аудио:</b> пришли аудиофайл\n\n"
+            "🎧 <b>Аудио:</b> пришли аудиофайл\n"
+            "💱 Можно в любой валюте: «такси 12 долларов» — переведу сам.\n\n"
             "<b>Команды</b>\n"
             "💰 /budget [сумма] — установить бюджет\n"
+            "🎯 /goals — цели накопления\n"
             "📊 /report — отчёт за месяц\n"
             "📋 /history — последние 10 трат\n"
             "💡 /tips — советы по экономии\n"
+            "💱 /currency — валюта\n"
+            "🔔 /settings — уведомления\n"
             "↩️ /undo — удалить последнюю трату\n"
             "🗑 /reset — удалить все траты\n"
             "🌐 /lang ru|en — сменить язык"
@@ -68,6 +73,50 @@ TEXTS = {
         ),
         "budget_custom_prompt": "✏️ Введи сумму бюджета числом.\nНапример: <code>/budget 6000000</code>",
         "more_menu": "⚙️ <b>Ещё</b>\n━━━━━━━━━━━━━━━━━━━\n\nВыбери действие:",
+        # ── Savings goals ──
+        "goals_hint": "Нажми на цель, чтобы пополнить или изменить",
+        "goal_new_prompt": (
+            "🎯 <b>Новая цель</b>\n"
+            "━━━━━━━━━━━━━━━━━━━\n\n"
+            "Отправь одним сообщением:\n"
+            "<b>Название · сумма · срок</b>\n\n"
+            "Примеры:\n"
+            "<code>Отпуск · 10 000 000 · 2026-12-31</code>\n"
+            "<code>Новый ноутбук · 12000000</code>\n\n"
+            "Срок (ГГГГ-ММ-ДД) можно не указывать."
+        ),
+        "goal_create_invalid": (
+            "🤔 Не понял цель.\nФормат: <b>Название · сумма · срок</b>\n"
+            "Например: <code>Машина · 50000000 · 2027-01-01</code>"
+        ),
+        "goal_created": "✅ <b>Цель создана!</b>\nЯ помогу тебе накопить 💪",
+        "goal_contribute_prompt": "💰 Сколько отложить в «{title}»?\nОтправь сумму числом (в {currency}).",
+        "goal_contributed": "✅ <b>Отложено {amount}</b> → «{title}»\n{bar} <b>{pct}%</b>",
+        "goal_contribute_invalid": "❌ Укажи сумму числом, например <code>200000</code>.",
+        "goal_done_celebrate": "🏆 <b>Цель достигнута!</b>\n«{title}» — {amount}\nТы молодец! 🎉",
+        "goal_deleted": "🗑 Цель удалена.",
+        "goal_not_found": "📭 Цель не найдена.",
+        "goal_detail_hint": "💰 Пополнить · ✏️ Изменить срок · 🗑 Удалить",
+        "goal_edit_deadline_prompt": "📅 Отправь новый срок (ГГГГ-ММ-ДД) или <code>-</code>, чтобы убрать.",
+        "goal_deadline_set": "✅ Срок обновлён.",
+        "goal_deadline_cleared": "✅ Срок убран.",
+        # ── Currency ──
+        "currency_prompt": (
+            "💱 <b>Валюта</b>\n━━━━━━━━━━━━━━━━━━━\n\n"
+            "Текущая: <b>{currency}</b>\n"
+            "Выбери основную валюту — в ней считаются бюджет и аналитика:"
+        ),
+        "currency_changed": (
+            "✅ Основная валюта: <b>{currency}</b>\n"
+            "💡 Прежние траты остаются как есть. Новые можно вводить в любой валюте — переведу автоматически."
+        ),
+        "currency_usage": "💱 Используй: <code>/currency USD</code>\nДоступно: {codes}",
+        # ── Notification settings ──
+        "settings_title": (
+            "🔔 <b>Уведомления</b>\n━━━━━━━━━━━━━━━━━━━\n\n"
+            "Выбери, о чём напоминать. Нажми, чтобы включить или выключить:"
+        ),
+        "settings_saved": "✅ Сохранено.",
     },
     "en": {
         "welcome": (
@@ -78,7 +127,8 @@ TEXTS = {
             "⌨️ <b>Text</b> — 'taxi 25000'\n"
             "🎤 <b>Voice</b> — say the purchase\n"
             "📸 <b>Photo</b> — send a receipt\n\n"
-            "I'll log it, categorize it and give advice 🤝\n\n"
+            "I'll log it, categorize it and give advice 🤝\n"
+            "🎯 I'll also help you save toward goals and nudge you when to ease off.\n\n"
             "👇 The buttons below do everything else."
         ),
         "help_text": (
@@ -87,12 +137,16 @@ TEXTS = {
             "⌨️ <b>Text:</b> 'spent 50000 on taxi'\n"
             "🎤 <b>Voice:</b> record a voice note\n"
             "📸 <b>Photo:</b> snap a receipt\n"
-            "🎧 <b>Audio:</b> send an audio file\n\n"
+            "🎧 <b>Audio:</b> send an audio file\n"
+            "💱 Any currency works: 'taxi 12 dollars' — I'll convert it.\n\n"
             "<b>Commands</b>\n"
             "💰 /budget [amount] — set budget\n"
+            "🎯 /goals — savings goals\n"
             "📊 /report — monthly report\n"
             "📋 /history — last 10 transactions\n"
             "💡 /tips — savings tips\n"
+            "💱 /currency — currency\n"
+            "🔔 /settings — notifications\n"
             "↩️ /undo — delete last transaction\n"
             "🗑 /reset — delete all transactions\n"
             "🌐 /lang ru|en — change language"
@@ -138,6 +192,50 @@ TEXTS = {
         ),
         "budget_custom_prompt": "✏️ Send the budget amount as a number.\nExample: <code>/budget 6000000</code>",
         "more_menu": "⚙️ <b>More</b>\n━━━━━━━━━━━━━━━━━━━\n\nChoose an action:",
+        # ── Savings goals ──
+        "goals_hint": "Tap a goal to top it up or edit it",
+        "goal_new_prompt": (
+            "🎯 <b>New goal</b>\n"
+            "━━━━━━━━━━━━━━━━━━━\n\n"
+            "Send it in one message:\n"
+            "<b>Title · amount · deadline</b>\n\n"
+            "Examples:\n"
+            "<code>Vacation · 10000000 · 2026-12-31</code>\n"
+            "<code>New laptop · 12000000</code>\n\n"
+            "The deadline (YYYY-MM-DD) is optional."
+        ),
+        "goal_create_invalid": (
+            "🤔 Couldn't read that goal.\nFormat: <b>Title · amount · deadline</b>\n"
+            "e.g.: <code>Car · 50000000 · 2027-01-01</code>"
+        ),
+        "goal_created": "✅ <b>Goal created!</b>\nI'll help you save 💪",
+        "goal_contribute_prompt": "💰 How much to put toward “{title}”?\nSend a number (in {currency}).",
+        "goal_contributed": "✅ <b>Added {amount}</b> → “{title}”\n{bar} <b>{pct}%</b>",
+        "goal_contribute_invalid": "❌ Send an amount as a number, e.g. <code>200000</code>.",
+        "goal_done_celebrate": "🏆 <b>Goal reached!</b>\n“{title}” — {amount}\nWell done! 🎉",
+        "goal_deleted": "🗑 Goal deleted.",
+        "goal_not_found": "📭 Goal not found.",
+        "goal_detail_hint": "💰 Top up · ✏️ Edit deadline · 🗑 Delete",
+        "goal_edit_deadline_prompt": "📅 Send a new deadline (YYYY-MM-DD), or <code>-</code> to clear it.",
+        "goal_deadline_set": "✅ Deadline updated.",
+        "goal_deadline_cleared": "✅ Deadline cleared.",
+        # ── Currency ──
+        "currency_prompt": (
+            "💱 <b>Currency</b>\n━━━━━━━━━━━━━━━━━━━\n\n"
+            "Current: <b>{currency}</b>\n"
+            "Pick your base currency — budget and analytics are calculated in it:"
+        ),
+        "currency_changed": (
+            "✅ Base currency: <b>{currency}</b>\n"
+            "💡 Existing transactions stay as-is. New ones can be entered in any currency — I'll convert."
+        ),
+        "currency_usage": "💱 Use: <code>/currency USD</code>\nAvailable: {codes}",
+        # ── Notification settings ──
+        "settings_title": (
+            "🔔 <b>Notifications</b>\n━━━━━━━━━━━━━━━━━━━\n\n"
+            "Choose what to be reminded about. Tap to turn on or off:"
+        ),
+        "settings_saved": "✅ Saved.",
     },
 }
 

@@ -105,6 +105,8 @@ async def save_transaction(
     ai_advice: str,
     input_type: str = "text",
     purchase_date: str | None = None,
+    original_amount: float | None = None,
+    original_currency: str | None = None,
 ) -> dict:
     try:
         # Validate/normalize an optional explicit date; fall back to today (Tashkent).
@@ -129,6 +131,9 @@ async def save_transaction(
                         "ai_advice": ai_advice,
                         "input_type": input_type,
                         "purchase_date": pdate,
+                        # Stored only when the entry currency differs from the base.
+                        "original_amount": original_amount,
+                        "original_currency": original_currency,
                     }
                 )
                 .execute()
@@ -398,6 +403,301 @@ async def update_language(user_id: int, language: str) -> None:
         await asyncio.to_thread(_update)
     except Exception as e:
         logger.error("update_language error user_id=%s: %s", user_id, e)
+
+
+async def update_currency(user_id: int, currency: str) -> None:
+    """Change the user's base/display currency (validated by the caller)."""
+    try:
+        def _update():
+            return (
+                get_client()
+                .table("users")
+                .update({"currency": currency})
+                .eq("telegram_id", user_id)
+                .execute()
+            )
+
+        await asyncio.to_thread(_update)
+    except Exception as e:
+        logger.error("update_currency error user_id=%s: %s", user_id, e)
+
+
+# ───────────────────────── Notification settings ─────────────────────────
+
+# Sensible defaults: alerts that matter are on; the chatty daily digest is off.
+DEFAULT_NOTIFY = {
+    "budget_alerts": True,    # 80% / 100% budget thresholds (real-time)
+    "large_tx": True,         # unusually large single purchase
+    "daily_digest": False,    # evening recap of the day
+    "weekly_summary": True,   # Sunday week recap
+    "goal_reminders": True,   # savings-goal deadline nudges
+}
+
+
+def notify_settings_of(user: dict) -> dict:
+    """Merge a user's stored notify_settings over the defaults."""
+    merged = dict(DEFAULT_NOTIFY)
+    raw = (user or {}).get("notify_settings") or {}
+    if isinstance(raw, dict):
+        for k in DEFAULT_NOTIFY:
+            if k in raw:
+                merged[k] = bool(raw[k])
+    return merged
+
+
+async def update_notify_settings(user_id: int, settings: dict) -> dict:
+    """Persist the full (already merged) notify_settings object."""
+    clean = {k: bool(settings.get(k, DEFAULT_NOTIFY[k])) for k in DEFAULT_NOTIFY}
+    try:
+        def _update():
+            return (
+                get_client()
+                .table("users")
+                .update({"notify_settings": clean})
+                .eq("telegram_id", user_id)
+                .execute()
+            )
+
+        await asyncio.to_thread(_update)
+    except Exception as e:
+        logger.error("update_notify_settings error user_id=%s: %s", user_id, e)
+    return clean
+
+
+# ───────────────────────── Notification dedup log ─────────────────────────
+
+async def notif_already_sent(user_id: int, dedup_key: str) -> bool:
+    """True if a notification with this dedup_key was already logged for the user."""
+    try:
+        def _select():
+            return (
+                get_client()
+                .table("notifications_log")
+                .select("id")
+                .eq("user_id", user_id)
+                .eq("dedup_key", dedup_key)
+                .limit(1)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_select)
+        return bool(result and result.data)
+    except Exception as e:
+        logger.error("notif_already_sent error user_id=%s key=%s: %s", user_id, dedup_key, e)
+        return False
+
+
+async def mark_notif_sent(user_id: int, ntype: str, dedup_key: str) -> bool:
+    """Record that a notification was sent. Returns True on first insert, False if
+    it already existed (unique constraint) — lets callers treat this as a claim."""
+    try:
+        def _insert():
+            return (
+                get_client()
+                .table("notifications_log")
+                .insert({"user_id": user_id, "type": ntype, "dedup_key": dedup_key})
+                .execute()
+            )
+
+        await asyncio.to_thread(_insert)
+        return True
+    except Exception as e:
+        # Unique violation == already sent (race or repeat) — not an error worth shouting about.
+        msg = str(e).lower()
+        if "duplicate" in msg or "unique" in msg or "23505" in msg:
+            return False
+        logger.error("mark_notif_sent error user_id=%s key=%s: %s", user_id, dedup_key, e)
+        return False
+
+
+# ───────────────────────── Date-range queries (digests) ─────────────────────────
+
+async def get_transactions_in_range(user_id: int, start_iso: str, end_iso: str) -> list[dict]:
+    """All transactions with purchase_date in [start_iso, end_iso] (inclusive)."""
+    try:
+        def _select():
+            return (
+                get_client()
+                .table("transactions")
+                .select("amount, category, purchase_date")
+                .eq("user_id", user_id)
+                .gte("purchase_date", start_iso)
+                .lte("purchase_date", end_iso)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_select)
+        return result.data if (result and result.data) else []
+    except Exception as e:
+        logger.error("get_transactions_in_range error user_id=%s: %s", user_id, e)
+        return []
+
+
+# ───────────────────────── Savings goals ─────────────────────────
+
+async def create_goal(
+    user_id: int,
+    title: str,
+    target_amount: float,
+    currency: str,
+    emoji: str = "🎯",
+    deadline: str | None = None,
+    saved_amount: float = 0.0,
+) -> dict:
+    try:
+        dl = None
+        if deadline:
+            try:
+                dl = date.fromisoformat(str(deadline)[:10]).isoformat()
+            except ValueError:
+                dl = None
+
+        def _insert():
+            return (
+                get_client()
+                .table("goals")
+                .insert(
+                    {
+                        "user_id": user_id,
+                        "title": title[:120],
+                        "target_amount": float(target_amount),
+                        "currency": currency,
+                        "emoji": emoji or "🎯",
+                        "deadline": dl,
+                        "saved_amount": float(saved_amount or 0),
+                        "status": "active",
+                    }
+                )
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_insert)
+        return result.data[0] if (result and result.data) else {}
+    except Exception as e:
+        logger.error("create_goal error user_id=%s: %s", user_id, e)
+        return {}
+
+
+async def get_goals(user_id: int, include_archived: bool = False) -> list[dict]:
+    """Active + done goals (done shown so users see their wins), newest first."""
+    try:
+        def _select():
+            q = (
+                get_client()
+                .table("goals")
+                .select("*")
+                .eq("user_id", user_id)
+            )
+            if not include_archived:
+                q = q.neq("status", "archived")
+            return q.order("created_at", desc=True).execute()
+
+        result = await asyncio.to_thread(_select)
+        return result.data if (result and result.data) else []
+    except Exception as e:
+        logger.error("get_goals error user_id=%s: %s", user_id, e)
+        return []
+
+
+async def get_goal(user_id: int, goal_id: int) -> dict:
+    try:
+        def _select():
+            return (
+                get_client()
+                .table("goals")
+                .select("*")
+                .eq("id", goal_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_select)
+        return result.data[0] if (result and result.data) else {}
+    except Exception as e:
+        logger.error("get_goal error user_id=%s id=%s: %s", user_id, goal_id, e)
+        return {}
+
+
+async def add_goal_contribution(user_id: int, goal_id: int, amount: float, note: str | None = None) -> dict:
+    """Add (or withdraw, if negative) toward a goal. Logs the contribution and
+    updates the goal's saved_amount + status. Returns the updated goal (or {})."""
+    try:
+        goal = await get_goal(user_id, goal_id)
+        if not goal:
+            return {}
+
+        def _insert():
+            return (
+                get_client()
+                .table("goal_contributions")
+                .insert({"goal_id": goal_id, "user_id": user_id, "amount": float(amount), "note": note})
+                .execute()
+            )
+
+        await asyncio.to_thread(_insert)
+
+        new_saved = max(0.0, float(goal.get("saved_amount", 0) or 0) + float(amount))
+        target = float(goal.get("target_amount", 0) or 0)
+        status = "done" if (target > 0 and new_saved >= target) else "active"
+
+        def _update():
+            return (
+                get_client()
+                .table("goals")
+                .update({"saved_amount": new_saved, "status": status})
+                .eq("id", goal_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_update)
+        return result.data[0] if (result and result.data) else {**goal, "saved_amount": new_saved, "status": status}
+    except Exception as e:
+        logger.error("add_goal_contribution error user_id=%s id=%s: %s", user_id, goal_id, e)
+        return {}
+
+
+async def update_goal(user_id: int, goal_id: int, fields: dict) -> dict:
+    """Patch allowed goal fields (title, emoji, target_amount, deadline, status)."""
+    allowed = {"title", "emoji", "target_amount", "deadline", "status", "currency"}
+    patch = {k: v for k, v in (fields or {}).items() if k in allowed}
+    if not patch:
+        return await get_goal(user_id, goal_id)
+    try:
+        def _update():
+            return (
+                get_client()
+                .table("goals")
+                .update(patch)
+                .eq("id", goal_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_update)
+        return result.data[0] if (result and result.data) else {}
+    except Exception as e:
+        logger.error("update_goal error user_id=%s id=%s: %s", user_id, goal_id, e)
+        return {}
+
+
+async def delete_goal(user_id: int, goal_id: int) -> bool:
+    try:
+        def _delete():
+            return (
+                get_client()
+                .table("goals")
+                .delete()
+                .eq("id", goal_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_delete)
+        return bool(result and result.data)
+    except Exception as e:
+        logger.error("delete_goal error user_id=%s id=%s: %s", user_id, goal_id, e)
+        return False
 
 
 async def get_all_users() -> list[dict]:

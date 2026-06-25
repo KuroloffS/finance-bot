@@ -14,23 +14,38 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from services.currency_service import (
+    CURRENCIES,
+    DEFAULT_CURRENCY,
+    convert,
+    normalize_currency,
+)
 from services.groq_service import get_savings_tips, parse_text_purchase
 from services.supabase_service import (
+    add_goal_contribution,
+    create_goal,
     delete_all_transactions,
+    delete_goal,
     delete_transaction,
     get_daily_spent_last_n,
+    get_goal,
+    get_goals,
     get_month_spent_through_day,
     get_monthly_summary,
     get_monthly_summary_for,
     get_or_create_user,
     get_transactions_for_month,
     make_budget_status,
+    notify_settings_of,
     now_local,
     save_transaction,
     update_budget,
+    update_currency,
+    update_goal,
     update_language,
+    update_notify_settings,
 )
-from utils.formatters import CATEGORY_EMOJI, compute_analytics
+from utils.formatters import CATEGORY_EMOJI, compute_analytics, goal_progress
 from web.auth import validate_init_data
 
 logger = logging.getLogger(__name__)
@@ -82,6 +97,27 @@ def _f(v) -> float:
         return 0.0
 
 
+def _goal_dto(g: dict, today) -> dict:
+    """Serialize a goal row + computed progress for the Mini App."""
+    p = goal_progress(g, today)
+    return {
+        "id": g.get("id"),
+        "title": g.get("title", ""),
+        "emoji": g.get("emoji") or "🎯",
+        "target_amount": _f(g.get("target_amount")),
+        "saved_amount": _f(g.get("saved_amount")),
+        "currency": normalize_currency(g.get("currency"), DEFAULT_CURRENCY),
+        "deadline": str(g.get("deadline"))[:10] if g.get("deadline") else None,
+        "status": g.get("status", "active"),
+        "percent": round(p["percent"], 1),
+        "remaining": p["remaining"],
+        "days_left": p["days_left"],
+        "per_day": p["per_day"],
+        "overdue": p["overdue"],
+        "done": p["done"],
+    }
+
+
 # ───────────────────────── App ─────────────────────────
 
 def create_app() -> FastAPI:
@@ -106,8 +142,14 @@ def create_app() -> FastAPI:
         return {
             "first_name": user.get("first_name"),
             "budget": _f(user.get("monthly_budget", DEFAULT_BUDGET)),
-            "currency": user.get("currency", "UZS"),
+            "currency": normalize_currency(user.get("currency"), DEFAULT_CURRENCY),
             "language": user.get("language", "ru"),
+            "notify": notify_settings_of(user),
+            "currencies": [
+                {"code": c, "flag": m["flag"], "symbol": m["symbol"],
+                 "name": m["name_en"], "name_ru": m["name_ru"]}
+                for c, m in CURRENCIES.items()
+            ],
         }
 
     @app.get("/api/overview")
@@ -189,6 +231,8 @@ def create_app() -> FastAPI:
                 "input_type": r.get("input_type", "text"),
                 "purchase_date": str(r.get("purchase_date", ""))[:10],
                 "created_at": r.get("created_at"),
+                "original_amount": _f(r.get("original_amount")) if r.get("original_amount") else None,
+                "original_currency": r.get("original_currency"),
             }
             for r in rows
         ]
@@ -200,6 +244,7 @@ def create_app() -> FastAPI:
         description: str | None = None
         merchant: str | None = None
         purchase_date: str | None = None
+        currency: str | None = None
 
     @app.post("/api/transactions")
     async def api_add(tx: NewTx, user: dict = Depends(current_user)):
@@ -207,10 +252,19 @@ def create_app() -> FastAPI:
         if tx.amount is None or tx.amount <= 0:
             raise HTTPException(status_code=400, detail="amount must be > 0")
         category = tx.category if tx.category in CATEGORIES else "Другое"
+        base = normalize_currency(user.get("currency"), DEFAULT_CURRENCY)
+        entry_cur = normalize_currency(tx.currency, base)
+        amount = float(tx.amount)
+        original_amount = original_currency = None
+        base_amount = amount
+        if entry_cur != base:
+            base_amount = await convert(amount, entry_cur, base)
+            original_amount, original_currency = amount, entry_cur
         saved = await save_transaction(
-            uid, float(tx.amount), category,
+            uid, base_amount, category,
             (tx.description or "").strip(), (tx.merchant or "").strip() or None,
             "", "app", purchase_date=tx.purchase_date,
+            original_amount=original_amount, original_currency=original_currency,
         )
         return {"ok": True, "transaction": saved}
 
@@ -221,14 +275,29 @@ def create_app() -> FastAPI:
     async def api_quick_add(q: QuickAdd, user: dict = Depends(current_user)):
         uid = user["telegram_id"]
         budget = _f(user.get("monthly_budget", DEFAULT_BUDGET))
-        ctx = {"language": user.get("language", "ru"), "monthly_budget": budget, "spent_this_month": 0}
+        base = normalize_currency(user.get("currency"), DEFAULT_CURRENCY)
+        ctx = {
+            "language": user.get("language", "ru"),
+            "monthly_budget": budget,
+            "spent_this_month": 0,
+            "currency": base,
+        }
         result = await parse_text_purchase(q.text or "", ctx)
         if not result.get("amount"):
             raise HTTPException(status_code=422, detail="Could not parse")
+        entry_cur = normalize_currency(result.get("currency"), base)
+        amount = float(result["amount"])
+        original_amount = original_currency = None
+        base_amount = amount
+        if entry_cur != base:
+            base_amount = await convert(amount, entry_cur, base)
+            original_amount, original_currency = amount, entry_cur
+        result["amount"] = base_amount
         saved = await save_transaction(
-            uid, float(result["amount"]), result["category"],
+            uid, base_amount, result["category"],
             result.get("description", ""), result.get("merchant"),
             result.get("advice", ""), "app",
+            original_amount=original_amount, original_currency=original_currency,
         )
         return {"ok": True, "transaction": saved, "parsed": result}
 
@@ -264,10 +333,11 @@ def create_app() -> FastAPI:
     async def api_tips(user: dict = Depends(current_user)):
         uid = user["telegram_id"]
         lang = user.get("language", "ru")
+        cur = normalize_currency(user.get("currency"), DEFAULT_CURRENCY)
         summary = await get_monthly_summary(uid)
         if not summary:
             return {"tips": ""}
-        tips = await get_savings_tips(summary, lang)
+        tips = await get_savings_tips(summary, lang, cur)
         return {"tips": tips or ""}
 
     @app.post("/api/reset")
@@ -278,5 +348,105 @@ def create_app() -> FastAPI:
     @app.get("/api/categories")
     async def api_categories():
         return {"categories": [{"name": c, "emoji": CATEGORY_EMOJI[c]} for c in CATEGORIES]}
+
+    # ───────────────────────── Currency ─────────────────────────
+
+    class CurrencyBody(BaseModel):
+        currency: str
+
+    @app.post("/api/currency")
+    async def api_currency(b: CurrencyBody, user: dict = Depends(current_user)):
+        code = normalize_currency(b.currency, "")
+        if code not in CURRENCIES:
+            raise HTTPException(status_code=400, detail="unsupported currency")
+        await update_currency(user["telegram_id"], code)
+        return {"ok": True, "currency": code}
+
+    # ───────────────────────── Notification settings ─────────────────────────
+
+    class NotifyBody(BaseModel):
+        settings: dict
+
+    @app.post("/api/settings")
+    async def api_settings(b: NotifyBody, user: dict = Depends(current_user)):
+        merged = notify_settings_of(user)
+        for k, v in (b.settings or {}).items():
+            if k in merged:
+                merged[k] = bool(v)
+        saved = await update_notify_settings(user["telegram_id"], merged)
+        return {"ok": True, "notify": saved}
+
+    # ───────────────────────── Savings goals ─────────────────────────
+
+    @app.get("/api/goals")
+    async def api_goals(user: dict = Depends(current_user)):
+        uid = user["telegram_id"]
+        today = now_local().date()
+        goals = await get_goals(uid)
+        return {"goals": [_goal_dto(g, today) for g in goals]}
+
+    class NewGoal(BaseModel):
+        title: str
+        target_amount: float
+        currency: str | None = None
+        emoji: str | None = None
+        deadline: str | None = None
+        saved_amount: float | None = None
+
+    @app.post("/api/goals")
+    async def api_create_goal(g: NewGoal, user: dict = Depends(current_user)):
+        uid = user["telegram_id"]
+        if not (g.title or "").strip():
+            raise HTTPException(status_code=400, detail="title required")
+        if g.target_amount is None or g.target_amount <= 0:
+            raise HTTPException(status_code=400, detail="target_amount must be > 0")
+        cur = normalize_currency(g.currency, normalize_currency(user.get("currency"), DEFAULT_CURRENCY))
+        goal = await create_goal(
+            uid, g.title.strip(), float(g.target_amount), cur,
+            emoji=(g.emoji or "🎯"), deadline=g.deadline,
+            saved_amount=float(g.saved_amount or 0),
+        )
+        if not goal:
+            raise HTTPException(status_code=500, detail="could not create goal")
+        return {"ok": True, "goal": _goal_dto(goal, now_local().date())}
+
+    class ContributeBody(BaseModel):
+        amount: float
+        note: str | None = None
+
+    @app.post("/api/goals/{goal_id}/contribute")
+    async def api_contribute(goal_id: int, b: ContributeBody, user: dict = Depends(current_user)):
+        uid = user["telegram_id"]
+        if b.amount is None or b.amount == 0:
+            raise HTTPException(status_code=400, detail="amount required")
+        goal = await add_goal_contribution(uid, goal_id, float(b.amount), (b.note or "").strip() or None)
+        if not goal:
+            raise HTTPException(status_code=404, detail="goal not found")
+        return {"ok": True, "goal": _goal_dto(goal, now_local().date())}
+
+    class UpdateGoal(BaseModel):
+        title: str | None = None
+        emoji: str | None = None
+        target_amount: float | None = None
+        deadline: str | None = None
+        status: str | None = None
+
+    @app.put("/api/goals/{goal_id}")
+    async def api_update_goal(goal_id: int, b: UpdateGoal, user: dict = Depends(current_user)):
+        uid = user["telegram_id"]
+        fields = {k: v for k, v in b.model_dump().items() if v is not None}
+        if "deadline" in (b.model_fields_set or set()):
+            fields["deadline"] = b.deadline  # allow explicit null to clear
+        goal = await update_goal(uid, goal_id, fields)
+        if not goal:
+            raise HTTPException(status_code=404, detail="goal not found")
+        return {"ok": True, "goal": _goal_dto(goal, now_local().date())}
+
+    @app.delete("/api/goals/{goal_id}")
+    async def api_delete_goal(goal_id: int, user: dict = Depends(current_user)):
+        ok = await delete_goal(user["telegram_id"], goal_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="goal not found")
+        return {"ok": True}
 
     return app

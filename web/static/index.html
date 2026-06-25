@@ -171,6 +171,38 @@ body{
 .empty .e{font-size:34px;display:block;margin-bottom:10px}
 .gate{position:fixed;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:30px;gap:8px}
 .gate .e{font-size:46px}
+
+/* goals */
+.goal{background:var(--surface);border:1px solid var(--hair);border-radius:16px;padding:14px;margin-bottom:12px}
+.goal .top{display:flex;gap:14px;align-items:center}
+.ring{flex:0 0 auto;position:relative;width:66px;height:66px}
+.ring svg{width:100%;height:100%;display:block}
+.ring .rc{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800}
+.gmid{flex:1;min-width:0}
+.gt{font-weight:700;font-size:14.5px;display:flex;align-items:center;gap:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gs{font-size:12px;color:var(--muted);margin-top:3px;line-height:1.4}
+.gactions{display:flex;gap:8px;margin-top:12px}
+.gbtn{flex:1;padding:9px 10px;border-radius:11px;background:var(--surface-2);border:1px solid var(--hair);color:var(--text);font-size:12.5px;font-weight:600;cursor:pointer;text-align:center}
+.gbtn.pri{background:linear-gradient(135deg,var(--accent),var(--accent-2));color:#fff;border-color:transparent}
+.gbtn.dz{color:var(--dang);flex:0 0 auto;width:44px}
+.gbtn.mini{flex:0 0 auto;padding:9px 14px}
+.newgoal{width:100%;padding:14px;border-radius:14px;background:var(--surface);border:1px dashed var(--border);color:var(--accent);font-size:13.5px;font-weight:700;cursor:pointer;margin-bottom:12px}
+.goalcap{font-size:12.5px;font-weight:700;padding:5px 12px;border-radius:999px;cursor:pointer}
+
+/* currency grid + toggles (profile) */
+.curgrid{display:flex;flex-wrap:wrap;gap:8px}
+.curchip{flex:1 1 28%;min-width:0;padding:11px 6px;border-radius:12px;background:var(--surface-2);border:1px solid var(--hair);font-size:13px;font-weight:600;cursor:pointer;text-align:center;display:flex;flex-direction:column;gap:3px;align-items:center}
+.curchip .fl{font-size:18px}
+.curchip.on{background:var(--accent);color:#fff;border-color:transparent}
+.tg{display:flex;justify-content:space-between;align-items:center;padding:13px 4px;border-bottom:1px solid var(--hair)}
+.tg:last-child{border-bottom:none}
+.tg .lbl{font-size:13.5px;font-weight:600}
+.tg .lbl .d{font-size:11px;color:var(--muted);font-weight:400;margin-top:1px}
+.sw2{width:46px;height:27px;border-radius:999px;background:var(--surface-3);position:relative;transition:background .2s;flex:0 0 auto;cursor:pointer}
+.sw2.on{background:var(--accent)}
+.sw2::after{content:"";position:absolute;top:3px;left:3px;width:21px;height:21px;border-radius:50%;background:#fff;transition:transform .2s}
+.sw2.on::after{transform:translateX(19px)}
+.curpick{display:flex;align-items:center;gap:6px;background:var(--surface-2);border:1px solid var(--hair);border-radius:10px;padding:7px 11px;font-size:13px;font-weight:600;cursor:pointer;flex:0 0 auto}
 </style>
 </head>
 <body>
@@ -201,6 +233,15 @@ body{
       <div class="scrub"><button id="aPrev">‹</button><b id="aLabel" style="min-width:88px">—</b><button id="aNext">›</button></div>
     </div>
     <div id="anBody"></div>
+  </section>
+
+  <!-- GOALS -->
+  <section class="screen" id="s-goals">
+    <div class="row sp" style="margin:2px 2px 14px">
+      <div class="h1">🎯 Цели</div>
+      <span class="goalcap" id="goalsTotal" style="background:rgba(108,123,255,.16);color:var(--accent)"></span>
+    </div>
+    <div id="goalsBody"></div>
   </section>
 
   <!-- PROFILE -->
@@ -237,6 +278,31 @@ body{
   </div>
 </div>
 
+<!-- GOAL CREATE SHEET -->
+<div class="sheetwrap" id="goalSheet">
+  <div class="sheet-scrim" id="goalScrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <h3 id="goalSheetTitle">Новая цель</h3>
+    <div class="field"><input id="gTitle" placeholder="🎯 Название — напр. «Отпуск»" maxlength="80"></div>
+    <div class="amount"><input id="gTarget" inputmode="numeric" placeholder="0"><div class="cur" id="gCurLbl">сум</div></div>
+    <div class="field"><input id="gDeadline" type="date"></div>
+    <button class="submit" id="gSubmit" disabled>Создать цель</button>
+  </div>
+</div>
+
+<!-- CONTRIBUTE SHEET -->
+<div class="sheetwrap" id="contribSheet">
+  <div class="sheet-scrim" id="contribScrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <h3 id="contribTitle">Пополнить цель</h3>
+    <div class="amount"><input id="cAmt" inputmode="numeric" placeholder="0"><div class="cur" id="cCurLbl">сум</div></div>
+    <div class="chiprail" id="contribPresets" style="justify-content:center;flex-wrap:wrap;padding-bottom:4px"></div>
+    <button class="submit" id="cSubmit" disabled>Отложить</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"><span id="toastMsg"></span><button id="toastAct"></button></div>
 <div class="gate" id="gate" style="display:none"><div class="e">📱</div><div style="font-weight:700">Открой приложение из Telegram</div><div class="muted" style="font-size:13px">Нажми кнопку «💼 Финансы» в боте.</div></div>
 
@@ -260,12 +326,37 @@ const MONTHS_GEN=["января","февраля","марта","апреля","�
 const WD=["вс","пн","вт","ср","чт","пт","сб"];
 const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion:reduce)").matches;
 
-let LANG="ru", CUR="сум", BUDGET=5000000, OFFSET=0, AN_OFFSET=0, OVERVIEW=null, TXS=[], TXFILTER={cat:null,q:""};
+let LANG="ru", CURCODE="UZS", BUDGET=5000000, OFFSET=0, AN_OFFSET=0, OVERVIEW=null, TXS=[], TXFILTER={cat:null,q:""};
+let ME=null, GOALS=[], CONTRIB_ID=null;
+
+const CURRENCIES={
+  UZS:{symbol:"сум",pos:"suffix",dec:0,grp:" ",flag:"🇺🇿"},
+  USD:{symbol:"$",pos:"prefix",dec:2,grp:",",flag:"🇺🇸"},
+  EUR:{symbol:"€",pos:"prefix",dec:2,grp:",",flag:"🇪🇺"},
+  RUB:{symbol:"₽",pos:"suffix",dec:0,grp:" ",flag:"🇷🇺"},
+  KZT:{symbol:"₸",pos:"suffix",dec:0,grp:" ",flag:"🇰🇿"},
+  TRY:{symbol:"₺",pos:"prefix",dec:0,grp:" ",flag:"🇹🇷"},
+  GBP:{symbol:"£",pos:"prefix",dec:2,grp:",",flag:"🇬🇧"},
+  AED:{symbol:"AED",pos:"suffix",dec:2,grp:",",flag:"🇦🇪"}
+};
+function curMeta(c){return CURRENCIES[c]||CURRENCIES.UZS;}
 
 /* ── utils ── */
-function money(v){v=Math.round(Number(v)||0);return v.toLocaleString("ru-RU").replace(/,/g," ")+" "+CUR;}
-function moneyShort(v){v=Number(v)||0;if(v>=1e6)return (v/1e6).toFixed(2).replace(".",",")+" млн";if(v>=1e3)return Math.round(v/1e3)+" тыс";return Math.round(v).toString();}
-function num(v){return (Math.round(Number(v)||0)).toLocaleString("ru-RU").replace(/,/g," ");}
+function fmtNum(v,dec,grp){v=Number(v)||0;const neg=v<0;v=Math.abs(v);
+  const s=v.toLocaleString("en-US",{minimumFractionDigits:dec,maximumFractionDigits:dec});
+  const parts=s.split(".");parts[0]=parts[0].replace(/,/g,grp);return (neg?"−":"")+parts.join(".");}
+function money(v,code){const m=curMeta(code||CURCODE);const body=fmtNum(v,m.dec,m.grp);return m.pos==="prefix"?m.symbol+body:body+" "+m.symbol;}
+function num(v,code){const m=curMeta(code||CURCODE);return fmtNum(v,0,m.grp);}
+function moneyShort(v,code){code=code||CURCODE;const m=curMeta(code);v=Number(v)||0;
+  if(m.dec===0){
+    if(v>=1e6)return (v/1e6).toFixed(2).replace(".",",")+(LANG==="ru"?" млн":"M");
+    if(v>=1e3)return Math.round(v/1e3)+(LANG==="ru"?" тыс":"K");
+    return Math.round(v).toString();
+  }
+  if(v>=1e6)return m.symbol+(v/1e6).toFixed(1)+"M";
+  if(v>=1e3)return m.symbol+(v/1e3).toFixed(1)+"K";
+  return money(v,code);
+}
 function el(html){const d=document.createElement("div");d.innerHTML=html.trim();return d.firstChild;}
 function haptic(type,style){try{if(!TG)return;const h=TG.HapticFeedback;if(type==="sel")h.selectionChanged();else if(type==="impact")h.impactOccurred(style||"light");else if(type==="notif")h.notificationOccurred(style||"success");}catch(e){}}
 function monthKey(off){const d=new Date();d.setDate(1);d.setMonth(d.getMonth()+off);return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0");}
@@ -369,6 +460,7 @@ function renderOverview(d){
       </div>
     </div>
     ${insight}
+    <div id="ovGoals"></div>
     <div class="card"><div class="row sp" style="margin-bottom:10px"><div class="eyebrow" style="margin:0">Недавние</div><span class="muted" style="font-size:12px;cursor:pointer" id="seeAll">Все ›</span></div><div id="recent"></div></div>`;
   // donut interaction
   const box=document.getElementById("donutBox");animateDonut(box);
@@ -389,6 +481,7 @@ function renderOverview(d){
   // recent
   const rec=TXS.slice(0,3);
   document.getElementById("recent").innerHTML = rec.length? rec.map(txMini).join("") : `<div class="muted" style="font-size:12.5px">Сегодня трат нет</div>`;
+  renderOvGoals();
 }
 function txMini(t){return `<div class="row sp" style="padding:6px 0"><span style="font-size:13px">${t.emoji} ${esc(t.merchant||t.category)}</span><b class="num" style="font-size:13px">−${num(t.amount)}</b></div>`;}
 
@@ -472,27 +565,38 @@ function renderAnalytics(d){
 }
 
 /* ── PROFILE ── */
+const BUD_PRESETS={UZS:[3e6,5e6,8e6],RUB:[50000,100000,200000],KZT:[200000,500000,1000000],TRY:[20000,50000,100000],USD:[1000,2000,5000],EUR:[1000,2000,5000],GBP:[1000,2000,4000],AED:[3000,8000,15000]};
 function renderProfile(){
+  if(!ME){loadMe().then(()=>renderProfile());return;}
   const body=document.getElementById("prBody");
+  const presets=BUD_PRESETS[CURCODE]||BUD_PRESETS.UZS;
+  const budBtns=presets.map(v=>`<button data-v="${v}">${moneyShort(v)}</button>`).join("")+`<button data-v="custom">Своя</button>`;
   body.innerHTML=`
-    <div class="card"><div class="eyebrow">Бюджет</div>
+    <div class="card"><div class="row sp" style="margin-bottom:12px"><div class="eyebrow" style="margin:0">Бюджет</div><span class="curpick" id="curPick">💱 ${CURCODE}</span></div>
       <div class="row sp" style="margin-bottom:12px"><span class="muted" style="font-size:13px">Текущий</span><b class="num">${money(BUDGET)}</b></div>
-      <div class="seg" id="budSeg"><button data-v="3000000">3 млн</button><button data-v="5000000">5 млн</button><button data-v="8000000">8 млн</button><button data-v="custom">Своя</button></div>
+      <div class="seg" id="budSeg">${budBtns}</div>
     </div>
+    <div class="card" id="curCard" style="display:none"><div class="eyebrow">Основная валюта</div><div class="curgrid" id="prCurrency"></div><div class="faint" style="font-size:11px;margin-top:10px;line-height:1.4">Прежние траты не пересчитываются. Новые можно вводить в любой валюте.</div></div>
+    <div class="card"><div class="eyebrow">Уведомления</div><div id="prNotify"></div></div>
     <div class="card"><div class="eyebrow">Язык</div><div class="seg" id="langSeg"><button data-v="ru" class="${LANG==='ru'?'on':''}">🇷🇺 RU</button><button data-v="en" class="${LANG==='en'?'on':''}">🇬🇧 EN</button></div></div>
+    <button class="listbtn" id="goalsNav">🎯 Мои цели <span>›</span></button>
     <button class="listbtn" id="tipsBtn">💡 Советы по экономии <span>›</span></button>
     <button class="listbtn" id="csvBtn">⬇️ Экспорт CSV <span>›</span></button>
     <button class="listbtn dz" id="resetBtn">🗑 Сбросить все траты <span>›</span></button>
     <div id="tipsBox"></div>`;
   document.querySelectorAll("#budSeg button").forEach(b=>b.onclick=async()=>{
     haptic("sel");
-    if(b.dataset.v==="custom"){const v=prompt("Введи бюджет, сум:");if(!v)return;const n=parseFloat(v.replace(/\D/g,""));if(!n)return;await setBudget(n);}
+    if(b.dataset.v==="custom"){const v=prompt("Введи бюджет:");if(!v)return;const n=parseFloat(v.replace(/[^\d.]/g,""));if(!n)return;await setBudget(n);}
     else await setBudget(+b.dataset.v);
   });
+  document.getElementById("curPick").onclick=()=>{const c=document.getElementById("curCard");c.style.display=c.style.display==="none"?"":"none";haptic("sel");};
   document.querySelectorAll("#langSeg button").forEach(b=>b.onclick=async()=>{LANG=b.dataset.v;haptic("sel");try{await api("/api/language",{method:"POST",body:{language:LANG}});}catch(e){}renderProfile();});
+  document.getElementById("goalsNav").onclick=()=>switchTab("goals");
   document.getElementById("tipsBtn").onclick=async()=>{const box=document.getElementById("tipsBox");box.innerHTML=`<div class="card sk" style="height:80px"></div>`;try{const r=await api("/api/tips");box.innerHTML=r.tips?`<div class="card" style="white-space:pre-wrap;font-size:13px;line-height:1.5">${esc(r.tips)}</div>`:`<div class="empty">Нет данных для советов</div>`;}catch(e){box.innerHTML=`<div class="empty">Ошибка</div>`;}};
   document.getElementById("csvBtn").onclick=exportCSV;
   document.getElementById("resetBtn").onclick=async()=>{if(!confirm("Удалить ВСЕ траты? Это необратимо."))return;try{await api("/api/reset",{method:"POST"});haptic("notif","warning");TXS=[];loadOverview();toast("Все траты удалены");switchTab("overview");}catch(e){toast("Ошибка");}};
+  renderCurrencyPicker();
+  renderNotify();
 }
 async function setBudget(n){try{await api("/api/budget",{method:"POST",body:{amount:n}});BUDGET=n;haptic("notif");toast("Бюджет: "+money(n));renderProfile();loadOverview();}catch(e){toast("Ошибка");}}
 function exportCSV(){
@@ -505,6 +609,7 @@ function exportCSV(){
 let SEL_CAT=null;
 function openSheet(){
   document.getElementById("sheet").classList.add("open");haptic("impact","light");
+  document.getElementById("curLbl").textContent=curMeta(CURCODE).symbol;
   document.getElementById("pdate").value=monthKey(0)+"-"+String(new Date().getDate()).padStart(2,"0");
   if(TG&&TG.BackButton){TG.BackButton.show();TG.BackButton.onClick(closeSheet);}
   setTimeout(()=>document.getElementById("amt").focus(),300);
@@ -551,7 +656,7 @@ async function quickAdd(){
 async function loadOverview(){
   try{
     const d=await api("/api/overview?month="+monthKey(OFFSET));
-    OVERVIEW=d;BUDGET=d.budget;CUR=d.currency==="UZS"?"сум":(d.currency||"сум");
+    OVERVIEW=d;BUDGET=d.budget;CURCODE=d.currency||"UZS";
     document.getElementById("mLabel").textContent=monthLabel(OFFSET);
     renderOverview(d);
   }catch(e){if(String(e.message).includes("401")||!INIT){showGate();}else{document.getElementById("ovBody").innerHTML=`<div class="empty">Ошибка загрузки</div>`;}}
@@ -572,6 +677,7 @@ function switchTab(name){
   haptic("sel");
   if(name==="analytics")loadAnalytics();
   if(name==="profile")renderProfile();
+  if(name==="goals")loadGoals();
   if(name==="transactions"&&!TXS.length)loadTx();
   window.scrollTo(0,0);
 }
@@ -600,6 +706,204 @@ function init(){
   loadOverview();loadTx();
 }
 init();
+</script>
+
+<script>
+"use strict";
+/* ═══════════════ Goals · Currency · Notifications ═══════════════ */
+
+function plural(n,f){n=Math.abs(n)%100;const n1=n%10;if(n>10&&n<20)return f[2];if(n1>1&&n1<5)return f[1];if(n1===1)return f[0];return f[2];}
+function goalColor(pct,done){if(done||pct>=100)return "#3FE08A";if(pct>=66)return "#43E0D8";if(pct>=33)return "#6C7BFF";return "#9B8CFF";}
+
+function ringSVG(pct,col){
+  const R=26,C=2*Math.PI*R,p=Math.max(0,Math.min(100,Number(pct)||0)),off=C*(1-p/100);
+  return `<svg viewBox="0 0 60 60"><g transform="rotate(-90 30 30)">
+    <circle cx="30" cy="30" r="${R}" fill="none" stroke="#1E2133" stroke-width="6"/>
+    <circle class="rfill" cx="30" cy="30" r="${R}" fill="none" stroke="${col}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${C}" stroke-dashoffset="${reduce?off:C}" data-off="${off}"/></g></svg>`;
+}
+function animateRings(c){if(reduce)return;c.querySelectorAll(".rfill").forEach((f,i)=>{const off=f.dataset.off;setTimeout(()=>{f.style.transition="stroke-dashoffset .8s cubic-bezier(.22,1,.36,1)";f.setAttribute("stroke-dashoffset",off);},60+i*70);});}
+
+function deadlineLabel(g){
+  if(g.days_left==null)return "";
+  if(g.overdue)return `<span class="warn">📅 срок прошёл</span>`;
+  let s=`📅 ещё ${g.days_left} ${plural(g.days_left,["день","дня","дней"])}`;
+  if(g.per_day&&!g.done)s+=` · ≈ ${money(g.per_day,g.currency)}/день`;
+  return `<span class="muted">${s}</span>`;
+}
+
+function goalCardHTML(g){
+  const col=goalColor(g.percent,g.done), pctTxt=g.done?"🏆":Math.round(g.percent)+"%", dl=g.deadline?deadlineLabel(g):"";
+  return `<div class="goal" data-id="${g.id}">
+    <div class="top">
+      <div class="ring">${ringSVG(g.percent,col)}<div class="rc" style="color:${col}">${pctTxt}</div></div>
+      <div class="gmid">
+        <div class="gt">${g.emoji} ${esc(g.title)}</div>
+        <div class="gs"><b class="num">${money(g.saved_amount,g.currency)}</b> / ${money(g.target_amount,g.currency)}${dl?"<br>"+dl:""}</div>
+      </div>
+    </div>
+    <div class="gactions">
+      ${g.done?`<button class="gbtn" data-act="add">＋ Ещё</button>`:`<button class="gbtn pri" data-act="add">＋ Пополнить</button>`}
+      ${(!g.done&&g.remaining>0)?`<button class="gbtn" data-act="fill">🎉 Закрыть</button>`:""}
+      <button class="gbtn dz" data-act="del">🗑</button>
+    </div>
+  </div>`;
+}
+
+function bindNewGoal(){const b=document.getElementById("newGoal2");if(b)b.onclick=openGoalSheet;}
+
+function renderGoals(){
+  const body=document.getElementById("goalsBody");if(!body)return;
+  const active=GOALS.filter(g=>g.status!=="archived");
+  const cap=document.getElementById("goalsTotal");
+  if(cap)cap.textContent=active.length?active.length+" "+plural(active.length,["цель","цели","целей"]):"";
+  let html=`<button class="newgoal" id="newGoal2">＋ Новая цель</button>`;
+  if(!active.length){body.innerHTML=html+`<div class="empty"><span class="e">🎯</span>Пока нет целей.<br>Поставь первую — и я помогу накопить.</div>`;bindNewGoal();return;}
+  html+=active.map(goalCardHTML).join("");
+  body.innerHTML=html;
+  bindNewGoal();
+  body.querySelectorAll(".goal").forEach(card=>{const id=+card.dataset.id;
+    card.querySelectorAll("[data-act]").forEach(b=>b.onclick=()=>goalAction(id,b.dataset.act));});
+  animateRings(body);
+}
+
+function goalAction(id,act){if(act==="add")openContrib(id);else if(act==="fill")fillGoal(id);else if(act==="del")deleteGoal(id);}
+
+function renderOvGoals(){
+  const box=document.getElementById("ovGoals");if(!box)return;
+  if(!GOALS.length){
+    box.innerHTML=`<div class="card" id="ovGoalNew" style="cursor:pointer"><div class="row sp"><div><div style="font-weight:700;font-size:14px">🎯 Цели накопления</div><div class="muted" style="font-size:12px;margin-top:3px">Поставь цель — и я помогу копить</div></div><span style="font-size:22px;color:var(--accent)">＋</span></div></div>`;
+    document.getElementById("ovGoalNew").onclick=()=>switchTab("goals");return;
+  }
+  const active=GOALS.filter(g=>g.status==="active"), done=GOALS.filter(g=>g.status==="done");
+  const show=(active.length?active:done).slice(0,2);
+  box.innerHTML=`<div class="card" id="ovGoalsCard" style="cursor:pointer">
+    <div class="row sp" style="margin-bottom:12px"><div class="eyebrow" style="margin:0">Цели</div><span class="muted" style="font-size:12px">Все ›</span></div>
+    ${show.map(g=>{const col=goalColor(g.percent,g.done);return `<div class="top" style="margin-bottom:12px">
+      <div class="ring" style="width:46px;height:46px">${ringSVG(g.percent,col)}<div class="rc" style="font-size:9.5px;color:${col}">${g.done?"🏆":Math.round(g.percent)+"%"}</div></div>
+      <div class="gmid"><div class="gt" style="font-size:13.5px">${g.emoji} ${esc(g.title)}</div><div class="gs">${money(g.saved_amount,g.currency)} / ${money(g.target_amount,g.currency)}</div></div></div>`;}).join("")}
+  </div>`;
+  document.getElementById("ovGoalsCard").onclick=()=>switchTab("goals");
+  animateRings(box);
+}
+
+async function loadGoals(){
+  if(!INIT)return;
+  try{const r=await api("/api/goals");GOALS=r.goals||[];}catch(e){GOALS=[];}
+  renderGoals();renderOvGoals();
+}
+
+async function loadMe(){
+  if(!INIT)return null;
+  try{ME=await api("/api/me");if(ME.language)LANG=ME.language;if(ME.currency)CURCODE=ME.currency;if(ME.budget)BUDGET=ME.budget;}
+  catch(e){ if(!ME)ME={notify:{},currencies:[],currency:CURCODE,budget:BUDGET,language:LANG}; }  // never leave ME null → avoids renderProfile recursion
+  return ME;
+}
+
+/* ── currency picker (profile) ── */
+function renderCurrencyPicker(){
+  const box=document.getElementById("prCurrency");if(!box||!ME)return;
+  const list=ME.currencies||[];
+  box.innerHTML=list.map(c=>`<div class="curchip ${c.code===CURCODE?'on':''}" data-c="${c.code}"><span class="fl">${c.flag}</span>${c.code}</div>`).join("");
+  box.querySelectorAll(".curchip").forEach(ch=>ch.onclick=async()=>{
+    const code=ch.dataset.c;if(code===CURCODE)return;haptic("sel");
+    try{await api("/api/currency",{method:"POST",body:{currency:code}});CURCODE=code;if(ME)ME.currency=code;toast("Валюта: "+code);renderProfile();loadOverview();loadGoals();}
+    catch(e){toast("Ошибка");}
+  });
+}
+
+/* ── notification toggles (profile) ── */
+const NOTIFY_META=[
+  ["budget_alerts","Бюджет 80% и 100%","Когда тратишь почти весь бюджет"],
+  ["large_tx","Крупные траты","Если покупка заметно больше обычной"],
+  ["weekly_summary","Итоги недели","Сводка каждое воскресенье"],
+  ["daily_digest","Итоги дня","Короткий обзор вечером"],
+  ["goal_reminders","Напоминания о целях","Когда близок срок цели"]
+];
+function renderNotify(){
+  const box=document.getElementById("prNotify");if(!box||!ME)return;
+  if(!ME.notify)ME.notify={};
+  const n=ME.notify;
+  box.innerHTML=NOTIFY_META.map(([k,t,d])=>`<div class="tg"><div class="lbl">${t}<div class="d">${d}</div></div><div class="sw2 ${n[k]?'on':''}" data-k="${k}"></div></div>`).join("");
+  box.querySelectorAll(".sw2").forEach(sw=>sw.onclick=async()=>{
+    const k=sw.dataset.k,val=!ME.notify[k];ME.notify[k]=val;sw.classList.toggle("on",val);haptic("sel");
+    try{await api("/api/settings",{method:"POST",body:{settings:{[k]:val}}});}
+    catch(e){ME.notify[k]=!val;sw.classList.toggle("on",!val);toast("Ошибка");}
+  });
+}
+
+/* ── goal create sheet ── */
+function openGoalSheet(){
+  document.getElementById("goalSheet").classList.add("open");
+  document.getElementById("gCurLbl").textContent=curMeta(CURCODE).symbol;
+  document.getElementById("gTitle").value="";document.getElementById("gTarget").value="";document.getElementById("gDeadline").value="";
+  updateGSubmit();haptic("impact","light");
+  setTimeout(()=>document.getElementById("gTitle").focus(),300);
+}
+function closeGoalSheet(){document.getElementById("goalSheet").classList.remove("open");}
+function gTargetVal(){return parseFloat((document.getElementById("gTarget").value||"").replace(/[^\d.]/g,""))||0;}
+function updateGSubmit(){document.getElementById("gSubmit").disabled=!(gTargetVal()>0&&document.getElementById("gTitle").value.trim());}
+async function submitGoal(){
+  const title=document.getElementById("gTitle").value.trim(),target=gTargetVal();
+  if(!title||!target)return;
+  const deadline=document.getElementById("gDeadline").value||null,btn=document.getElementById("gSubmit");
+  btn.disabled=true;
+  try{await api("/api/goals",{method:"POST",body:{title,target_amount:target,deadline,currency:CURCODE}});haptic("notif","success");closeGoalSheet();toast("Цель создана 🎯");await loadGoals();}
+  catch(e){toast("Ошибка: "+e.message);}finally{btn.disabled=false;}
+}
+
+/* ── contribute sheet ── */
+let CONTRIB_CUR="UZS";
+function openContrib(id){
+  const g=GOALS.find(x=>x.id===id);if(!g)return;
+  CONTRIB_ID=id;CONTRIB_CUR=g.currency||"UZS";
+  document.getElementById("contribSheet").classList.add("open");
+  document.getElementById("contribTitle").textContent=(g.emoji||"🎯")+" "+g.title;
+  document.getElementById("cCurLbl").textContent=curMeta(CONTRIB_CUR).symbol;
+  document.getElementById("cAmt").value="";updateCSubmit();
+  const rem=g.remaining||0,presets=[];
+  if(rem>0){presets.push(["25%",Math.round(rem*0.25)]);presets.push(["50%",Math.round(rem*0.5)]);presets.push(["Всё "+moneyShort(rem,CONTRIB_CUR),Math.round(rem)]);}
+  const pr=document.getElementById("contribPresets");
+  pr.innerHTML=presets.map(([l,v])=>`<div class="chip" data-v="${v}">${l}</div>`).join("");
+  pr.querySelectorAll(".chip").forEach(ch=>ch.onclick=()=>{document.getElementById("cAmt").value=fmtNum(+ch.dataset.v,0,curMeta(CONTRIB_CUR).grp);updateCSubmit();haptic("sel");});
+  haptic("impact","light");setTimeout(()=>document.getElementById("cAmt").focus(),300);
+}
+function closeContrib(){document.getElementById("contribSheet").classList.remove("open");CONTRIB_ID=null;}
+function cAmtVal(){return parseFloat((document.getElementById("cAmt").value||"").replace(/[^\d.]/g,""))||0;}
+function updateCSubmit(){document.getElementById("cSubmit").disabled=!(cAmtVal()>0);}
+async function submitContrib(){
+  const amount=cAmtVal();if(!amount||!CONTRIB_ID)return;
+  const btn=document.getElementById("cSubmit");btn.disabled=true;
+  try{const r=await api("/api/goals/"+CONTRIB_ID+"/contribute",{method:"POST",body:{amount}});
+    const done=r.goal&&r.goal.done;haptic("notif","success");closeContrib();toast(done?"🏆 Цель достигнута!":"Отложено 💰");await loadGoals();}
+  catch(e){toast("Ошибка");}finally{btn.disabled=false;}
+}
+async function fillGoal(id){
+  const g=GOALS.find(x=>x.id===id);if(!g||g.remaining<=0)return;
+  if(!confirm(`Закрыть цель «${g.title}»? Будет добавлено ${money(g.remaining,g.currency)}.`))return;
+  try{await api("/api/goals/"+id+"/contribute",{method:"POST",body:{amount:g.remaining}});haptic("notif","success");toast("🏆 Цель достигнута!");await loadGoals();}
+  catch(e){toast("Ошибка");}
+}
+async function deleteGoal(id){
+  const g=GOALS.find(x=>x.id===id);if(!g)return;
+  if(!confirm(`Удалить цель «${g.title}»?`))return;
+  try{await api("/api/goals/"+id,{method:"DELETE"});haptic("impact","medium");toast("Цель удалена");await loadGoals();}
+  catch(e){toast("Ошибка");}
+}
+
+/* ── wiring ── */
+(function initFeatures(){
+  const fmtAmt=(elId,curGetter)=>{const e=document.getElementById(elId);if(!e)return;e.addEventListener("input",ev=>{const v=ev.target.value.replace(/[^\d]/g,"");ev.target.value=v?fmtNum(+v,0,curMeta(curGetter()).grp):"";});};
+  document.getElementById("goalScrim").onclick=closeGoalSheet;
+  document.getElementById("contribScrim").onclick=closeContrib;
+  document.getElementById("gSubmit").onclick=submitGoal;
+  document.getElementById("cSubmit").onclick=submitContrib;
+  document.getElementById("gTitle").addEventListener("input",updateGSubmit);
+  document.getElementById("gTarget").addEventListener("input",updateGSubmit);
+  fmtAmt("gTarget",()=>CURCODE);
+  document.getElementById("cAmt").addEventListener("input",updateCSubmit);
+  fmtAmt("cAmt",()=>CONTRIB_CUR);
+  if(INIT){loadMe().then(()=>{loadGoals();});}
+})();
 </script>
 </body>
 </html>

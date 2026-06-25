@@ -1,49 +1,182 @@
 import logging
+from datetime import date, timedelta
 
 import pytz
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 
-from services.supabase_service import get_all_users, get_monthly_summary, get_budget_status
-from utils.formatters import format_monthly_report
+from services.currency_service import DEFAULT_CURRENCY, normalize_currency
+from services.supabase_service import (
+    get_all_users,
+    get_budget_status,
+    get_goals,
+    get_monthly_summary,
+    get_transactions_in_range,
+    mark_notif_sent,
+    notify_settings_of,
+    now_local,
+)
+from utils.formatters import (
+    format_daily_digest,
+    format_goal_reminder,
+    format_monthly_report,
+    format_weekly_summary,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _sum_amount(rows: list) -> float:
+    return sum(float(r.get("amount", 0) or 0) for r in rows)
+
+
+def _category_totals(rows: list) -> dict:
+    agg: dict[str, float] = {}
+    for r in rows:
+        cat = r.get("category", "Другое")
+        agg[cat] = agg.get(cat, 0.0) + float(r.get("amount", 0) or 0)
+    return agg
 
 
 def setup_scheduler(application) -> AsyncIOScheduler:
     tz = pytz.timezone("Asia/Tashkent")
     scheduler = AsyncIOScheduler(timezone=tz)
 
+    async def _send(tid, text):
+        await application.bot.send_message(chat_id=tid, text=text, parse_mode="HTML")
+
+    # ── Monthly category report (last day of month, 18:00) ──
     async def send_monthly_reports():
-        logger.info("Running monthly reports scheduler job")
+        logger.info("scheduler: monthly reports")
         users = await get_all_users()
         for user in users:
             try:
                 tid = user["telegram_id"]
                 lang = user.get("language", "ru")
+                cur = normalize_currency(user.get("currency"), DEFAULT_CURRENCY)
                 summary = await get_monthly_summary(tid)
-                status = await get_budget_status(tid)
                 if not summary:
                     continue
-                text = format_monthly_report(summary, status, lang)
-                await application.bot.send_message(
-                    chat_id=tid,
-                    text=text,
-                    parse_mode="HTML",
-                )
-                logger.info("Monthly report sent to %s", tid)
+                status = await get_budget_status(tid, budget=float(user.get("monthly_budget") or 5_000_000))
+                await _send(tid, format_monthly_report(summary, status, lang, currency=cur))
+                logger.info("monthly report sent to %s", tid)
             except Exception as e:
-                logger.warning(
-                    "Failed to send monthly report to %s: %s",
-                    user.get("telegram_id"),
-                    e,
+                logger.warning("monthly report failed %s: %s", user.get("telegram_id"), e)
+
+    # ── Daily wrap-up (21:00) — opt-in (off by default) ──
+    async def send_daily_digests():
+        logger.info("scheduler: daily digests")
+        users = await get_all_users()
+        today = now_local().date()
+        dkey = f"daily_digest:{today.isoformat()}"
+        for user in users:
+            try:
+                if not notify_settings_of(user).get("daily_digest"):
+                    continue
+                tid = user["telegram_id"]
+                lang = user.get("language", "ru")
+                cur = normalize_currency(user.get("currency"), DEFAULT_CURRENCY)
+                # Claim first (opt-in digest always sends once a day).
+                if not await mark_notif_sent(tid, "daily", dkey):
+                    continue
+                rows = await get_transactions_in_range(tid, today.isoformat(), today.isoformat())
+                total = _sum_amount(rows)
+                n = len(rows)
+                top = None
+                if rows:
+                    agg = _category_totals(rows)
+                    cat = max(agg, key=agg.get)
+                    top = {"category": cat, "amount": agg[cat]}
+                status = await get_budget_status(tid, budget=float(user.get("monthly_budget") or 5_000_000))
+                await _send(tid, format_daily_digest(total, n, top, status, lang, currency=cur))
+            except Exception as e:
+                logger.warning("daily digest failed %s: %s", user.get("telegram_id"), e)
+
+    # ── Weekly summary (Sunday 20:00) ──
+    async def send_weekly_summaries():
+        logger.info("scheduler: weekly summaries")
+        users = await get_all_users()
+        today = now_local().date()
+        wkey = f"weekly:{today.isoformat()}"
+        start = today - timedelta(days=6)
+        pstart = today - timedelta(days=13)
+        pend = today - timedelta(days=7)
+        for user in users:
+            try:
+                if not notify_settings_of(user).get("weekly_summary"):
+                    continue
+                tid = user["telegram_id"]
+                lang = user.get("language", "ru")
+                cur = normalize_currency(user.get("currency"), DEFAULT_CURRENCY)
+                rows = await get_transactions_in_range(tid, start.isoformat(), today.isoformat())
+                prows = await get_transactions_in_range(tid, pstart.isoformat(), pend.isoformat())
+                total = _sum_amount(rows)
+                prev_total = _sum_amount(prows)
+                # Skip truly inactive users (nothing this week or last).
+                if total <= 0 and prev_total <= 0:
+                    continue
+                if not await mark_notif_sent(tid, "weekly", wkey):
+                    continue
+                agg = _category_totals(rows)
+                top3 = [
+                    {"category": c, "amount": a}
+                    for c, a in sorted(agg.items(), key=lambda kv: kv[1], reverse=True)[:3]
+                ]
+                await _send(
+                    tid,
+                    format_weekly_summary(total, len(rows), top3, prev_total or None, lang, currency=cur),
                 )
+            except Exception as e:
+                logger.warning("weekly summary failed %s: %s", user.get("telegram_id"), e)
+
+    # ── Goal deadline reminders (daily 10:00) ──
+    async def send_goal_reminders():
+        logger.info("scheduler: goal reminders")
+        users = await get_all_users()
+        today = now_local().date()
+        for user in users:
+            try:
+                if not notify_settings_of(user).get("goal_reminders"):
+                    continue
+                tid = user["telegram_id"]
+                lang = user.get("language", "ru")
+                goals = await get_goals(tid)
+                for g in goals:
+                    if g.get("status") != "active" or not g.get("deadline"):
+                        continue
+                    try:
+                        dl = date.fromisoformat(str(g["deadline"])[:10])
+                    except (ValueError, TypeError):
+                        continue
+                    days_left = (dl - today).days
+                    # Nudge at 7 / 3 / 1 days out — each at most once per goal.
+                    if days_left in (7, 3, 1):
+                        key = f"goal_remind:{g['id']}:{days_left}"
+                        if not await mark_notif_sent(tid, "goal", key):
+                            continue
+                        await _send(tid, format_goal_reminder(g, lang, today=today))
+            except Exception as e:
+                logger.warning("goal reminders failed %s: %s", user.get("telegram_id"), e)
 
     scheduler.add_job(
         send_monthly_reports,
         trigger=CronTrigger(day="last", hour=18, minute=0),
-        id="monthly_reports",
-        replace_existing=True,
+        id="monthly_reports", replace_existing=True,
+    )
+    scheduler.add_job(
+        send_daily_digests,
+        trigger=CronTrigger(hour=21, minute=0),
+        id="daily_digests", replace_existing=True,
+    )
+    scheduler.add_job(
+        send_weekly_summaries,
+        trigger=CronTrigger(day_of_week="sun", hour=20, minute=0),
+        id="weekly_summaries", replace_existing=True,
+    )
+    scheduler.add_job(
+        send_goal_reminders,
+        trigger=CronTrigger(hour=10, minute=0),
+        id="goal_reminders", replace_existing=True,
     )
 
     logger.info("Scheduler configured (timezone: Asia/Tashkent)")

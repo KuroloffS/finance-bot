@@ -9,6 +9,13 @@ import time
 
 from groq import Groq
 
+from services.currency_service import (
+    CURRENCIES,
+    DEFAULT_CURRENCY,
+    currency_meta,
+    normalize_currency,
+)
+
 logger = logging.getLogger(__name__)
 
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -36,6 +43,7 @@ _FALLBACK = {
     "merchant": None,
     "description": "",
     "advice": "",
+    "currency": DEFAULT_CURRENCY,
 }
 
 
@@ -78,7 +86,7 @@ def _extract_json(raw: str) -> dict:
         raise
 
 
-def _normalize(result: dict, default_desc: str) -> dict:
+def _normalize(result: dict, default_desc: str, base_currency: str = DEFAULT_CURRENCY) -> dict:
     result.setdefault("amount", 0)
     result.setdefault("category", "Другое")
     result.setdefault("merchant", None)
@@ -89,6 +97,8 @@ def _normalize(result: dict, default_desc: str) -> dict:
     result["amount"] = _to_float(result["amount"])
     if isinstance(result.get("merchant"), str) and not result["merchant"].strip():
         result["merchant"] = None
+    # Currency: normalize to a supported ISO code, defaulting to the user's base.
+    result["currency"] = normalize_currency(result.get("currency"), base_currency)
     return result
 
 
@@ -96,31 +106,41 @@ async def parse_text_purchase(text: str, user_context: dict) -> dict:
     lang = user_context.get("language", "ru")
     budget = user_context.get("monthly_budget", 5_000_000)
     spent = user_context.get("spent_this_month", 0)
+    base_currency = normalize_currency(user_context.get("currency"), DEFAULT_CURRENCY)
+    base_meta = currency_meta(base_currency)
+    cur_word = base_meta["symbol"]
+    codes_str = "/".join(CURRENCIES.keys())
     categories_str = ", ".join(CATEGORIES)
 
     if lang == "ru":
         system_prompt = (
             "Ты — внимательный финансовый помощник. Извлеки данные о трате из сообщения.\n"
-            "Валюта: узбекские сумы (UZS). Суммы словами («двадцать пять тысяч», «полтора миллиона») "
-            "переводи в целое число сум.\n"
-            f"Контекст: месячный бюджет {budget:.0f} сум, уже потрачено {spent:.0f} сум.\n"
+            f"Валюта по умолчанию: {base_currency} ({cur_word}). Суммы словами «двадцать пять тысяч», "
+            "«полтора миллиона» переводи в число.\n"
+            "Если в сообщении явно указана ДРУГАЯ валюта (например $, доллары, евро, €, рубли, ₽, тенге), "
+            f"укажи её ISO-код в поле currency (одно из: {codes_str}), а amount — в этой валюте. "
+            f"Иначе currency = {base_currency}.\n"
+            f"Контекст: месячный бюджет {budget:.0f}, уже потрачено {spent:.0f} (в {base_currency}).\n"
             f"Категория — строго одна из: {categories_str}.\n"
             "Если в сообщении нет траты или суммы — верни amount = 0.\n"
             "Поле merchant — название магазина/заведения, если упомянуто, иначе null.\n"
             "advice — один короткий практичный совет по этой трате (одно предложение, по-дружески).\n"
-            'Ответь строго JSON: {"amount": <число>, "category": "<категория>", '
+            'Ответь строго JSON: {"amount": <число>, "currency": "<ISO>", "category": "<категория>", '
             '"merchant": "<строка|null>", "description": "<краткое описание траты>", "advice": "<совет>"}'
         )
     else:
         system_prompt = (
             "You are an attentive financial assistant. Extract purchase data from the message.\n"
-            "Currency: Uzbek sum (UZS). Convert worded amounts into integer sum.\n"
-            f"Context: monthly budget {budget:.0f} sum, already spent {spent:.0f} sum.\n"
+            f"Default currency: {base_currency} ({cur_word}). Convert worded amounts into a number.\n"
+            "If the message explicitly names ANOTHER currency (e.g. $, dollars, euro, €, rubles, ₽, tenge), "
+            f"put its ISO code in the currency field (one of: {codes_str}) and give amount in that currency. "
+            f"Otherwise currency = {base_currency}.\n"
+            f"Context: monthly budget {budget:.0f}, already spent {spent:.0f} (in {base_currency}).\n"
             f"Category — strictly one of: {categories_str}.\n"
             "If there is no purchase or amount — return amount = 0.\n"
             "merchant — store/place name if mentioned, otherwise null.\n"
             "advice — one short practical tip about this purchase (single friendly sentence).\n"
-            'Reply strictly JSON: {"amount": <number>, "category": "<category>", '
+            'Reply strictly JSON: {"amount": <number>, "currency": "<ISO>", "category": "<category>", '
             '"merchant": "<string|null>", "description": "<short description>", "advice": "<tip>"}'
         )
 
@@ -141,10 +161,10 @@ async def parse_text_purchase(text: str, user_context: dict) -> dict:
         response = await asyncio.to_thread(_call)
         raw = response.choices[0].message.content
         logger.info("parse_text -> %s", raw[:200])
-        return _normalize(_extract_json(raw), text)
+        return _normalize(_extract_json(raw), text, base_currency)
     except Exception as e:
         logger.error("parse_text_purchase error: %s | raw=%s", e, raw[:300])
-        return {**_FALLBACK, "description": text}
+        return {**_FALLBACK, "description": text, "currency": base_currency}
 
 
 async def transcribe_audio(audio_bytes: bytes, filename: str = "audio.ogg") -> str:
@@ -196,6 +216,8 @@ async def parse_photo_receipt(image_bytes: bytes, user_context: dict) -> dict:
 
         b64 = base64.b64encode(image_bytes).decode("utf-8")
         lang = user_context.get("language", "ru")
+        base_currency = normalize_currency(user_context.get("currency"), DEFAULT_CURRENCY)
+        codes_str = "/".join(CURRENCIES.keys())
         categories_str = ", ".join(CATEGORIES)
 
         if lang == "ru":
@@ -204,8 +226,10 @@ async def parse_photo_receipt(image_bytes: bytes, user_context: dict) -> dict:
                 "(только число, без пробелов и валюты), название магазина/заведения "
                 f"и категорию строго из списка: {categories_str}. "
                 "Если итог не виден — посчитай сумму позиций. "
+                f"Определи валюту чека (символ/код) и верни её ISO-код в поле currency (одно из: {codes_str}); "
+                f"если валюта не ясна — используй {base_currency}. "
                 "Ответь строго JSON без markdown: "
-                '{"amount": <число>, "category": "<категория>", "merchant": "<строка|null>", '
+                '{"amount": <число>, "currency": "<ISO>", "category": "<категория>", "merchant": "<строка|null>", '
                 '"description": "<что куплено>", "advice": "<короткий совет>"}'
             )
         else:
@@ -213,8 +237,10 @@ async def parse_photo_receipt(image_bytes: bytes, user_context: dict) -> dict:
                 "The photo is a receipt or price tag. Extract the TOTAL amount due "
                 "(number only, no spaces/currency), the store/place name, "
                 f"and a category strictly from: {categories_str}. "
+                f"Detect the receipt currency (symbol/code) and return its ISO code in the currency field "
+                f"(one of: {codes_str}); if unclear, use {base_currency}. "
                 "Reply strictly JSON, no markdown: "
-                '{"amount": <number>, "category": "<category>", "merchant": "<string|null>", '
+                '{"amount": <number>, "currency": "<ISO>", "category": "<category>", "merchant": "<string|null>", '
                 '"description": "<what was bought>", "advice": "<short tip>"}'
             )
 
@@ -241,36 +267,37 @@ async def parse_photo_receipt(image_bytes: bytes, user_context: dict) -> dict:
         response = await asyncio.to_thread(_call)
         raw = response.choices[0].message.content
         logger.info("parse_photo -> %s", raw[:200])
-        return _normalize(_extract_json(raw), "Чек")
+        return _normalize(_extract_json(raw), "Чек", base_currency)
     except Exception as e:
         logger.error("parse_photo_receipt error: %s | raw=%s", e, raw[:300])
         return {**_FALLBACK, "description": "Чек"}
 
 
-async def get_savings_tips(monthly_data: list, language: str) -> str:
+async def get_savings_tips(monthly_data: list, language: str, currency: str = DEFAULT_CURRENCY) -> str:
     if not monthly_data:
         return ""
 
+    cur_word = currency_meta(currency)["symbol"]
     total = sum(_to_float(r.get("total_spent")) for r in monthly_data)
     lines = []
     for row in sorted(monthly_data, key=lambda x: _to_float(x.get("total_spent")), reverse=True):
         amt = _to_float(row.get("total_spent"))
         share = (amt / total * 100) if total else 0
         lines.append(
-            f"- {row['category']}: {amt:,.0f} сум ({share:.0f}% трат, {row.get('num_transactions', 0)} операций)".replace(",", " ")
+            f"- {row['category']}: {amt:,.0f} {cur_word} ({share:.0f}% трат, {row.get('num_transactions', 0)} операций)".replace(",", " ")
         )
     data_str = "\n".join(lines)
 
     if language == "ru":
         prompt = (
-            f"Расходы пользователя за месяц (всего {total:,.0f} сум):\n{data_str}\n\n"
+            f"Расходы пользователя за месяц (всего {total:,.0f} {cur_word}):\n{data_str}\n\n"
             "Дай ровно 3 коротких конкретных совета по экономии — с цифрами и реальными шагами, "
             "опираясь на самые крупные категории. Пиши по-дружески, без воды. "
             "Каждый совет — с новой строки, начни с эмодзи."
         ).replace(",", " ")
     else:
         prompt = (
-            f"User's monthly expenses (total {total:,.0f} sum):\n{data_str}\n\n"
+            f"User's monthly expenses (total {total:,.0f} {cur_word}):\n{data_str}\n\n"
             "Give exactly 3 short, specific savings tips with numbers and concrete steps, "
             "focused on the largest categories. Friendly tone, no fluff. "
             "Each tip on a new line, starting with an emoji."
