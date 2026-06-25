@@ -29,7 +29,7 @@ body{
 .screen.active{display:block}
 @keyframes fade{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 .eyebrow{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:0 0 8px 2px}
-.card{background:var(--surface);border:1px solid var(--hair);border-radius:var(--r);padding:16px;margin-bottom:14px}
+.card{background:var(--surface);border:1px solid var(--hair);border-radius:var(--r);padding:16px;margin-bottom:14px;box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 6px 18px -10px rgba(0,0,0,.55)}
 .h1{font-size:17px;font-weight:700;margin:0}
 .row{display:flex;align-items:center}
 .sp{justify-content:space-between}
@@ -126,9 +126,11 @@ body{
 .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:30;display:flex;justify-content:center;pointer-events:none}
 .tabbar .inner{pointer-events:auto;width:100%;max-width:520px;height:calc(64px + var(--safe-b));padding-bottom:var(--safe-b);background:rgba(16,18,28,.82);backdrop-filter:blur(16px);-webkit-backdrop-filter:blur(16px);border-top:1px solid var(--hair);display:flex;align-items:center;justify-content:space-around;position:relative}
 .tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:3px;background:none;border:none;color:var(--faint);font-size:10px;font-weight:600;cursor:pointer;padding:8px 0}
-.tab .ic{font-size:19px;line-height:1}
+.tabgap{flex:1;height:1px;pointer-events:none}
+.tab .ic{font-size:19px;line-height:1;height:23px;display:flex;align-items:center}
+.tab .ic svg{width:23px;height:23px;display:block}
 .tab.on{color:var(--accent)}
-.fab{position:absolute;left:50%;top:-18px;transform:translateX(-50%);width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));border:none;color:#fff;font-size:28px;font-weight:300;cursor:pointer;box-shadow:0 8px 24px var(--glow);display:flex;align-items:center;justify-content:center}
+.fab{position:absolute;left:50%;top:-20px;transform:translateX(-50%);width:56px;height:56px;border-radius:50%;background:linear-gradient(135deg,var(--accent),var(--accent-2));border:3px solid var(--bg-elev);color:#fff;font-size:28px;font-weight:300;cursor:pointer;box-shadow:0 6px 20px -2px rgba(108,123,255,.5);display:flex;align-items:center;justify-content:center}
 .fab:active{transform:translateX(-50%) scale(.94)}
 
 /* add sheet */
@@ -253,11 +255,12 @@ body{
 
 <!-- TAB BAR -->
 <nav class="tabbar"><div class="inner">
-  <button class="tab on" data-tab="overview"><span class="ic">⌂</span>Обзор</button>
-  <button class="tab" data-tab="transactions"><span class="ic">≣</span>Траты</button>
-  <button class="fab" id="fab">+</button>
-  <button class="tab" data-tab="analytics"><span class="ic">▦</span>Аналитика</button>
-  <button class="tab" data-tab="profile"><span class="ic">☻</span>Профиль</button>
+  <button class="tab on" data-tab="overview"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.2 12 4l9 7.2"/><path d="M5 9.7V20h14V9.7"/></svg></span>Обзор</button>
+  <button class="tab" data-tab="transactions"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5h15"/><path d="M4.5 12h15"/><path d="M4.5 17.5h9"/></svg></span>Траты</button>
+  <div class="tabgap" aria-hidden="true"></div>
+  <button class="tab" data-tab="analytics"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><path d="M5 20V11"/><path d="M12 20V4"/><path d="M19 20v-6"/></svg></span>Аналитика</button>
+  <button class="tab" data-tab="profile"><span class="ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.4"/><path d="M5.5 20a6.5 6.5 0 0 1 13 0"/></svg></span>Профиль</button>
+  <button class="fab" id="fab" aria-label="Добавить">+</button>
 </div></nav>
 
 <!-- ADD SHEET -->

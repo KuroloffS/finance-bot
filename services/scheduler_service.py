@@ -18,7 +18,7 @@ from services.supabase_service import (
 )
 from utils.formatters import (
     format_daily_digest,
-    format_goal_reminder,
+    format_goal_pulse,
     format_monthly_report,
     format_weekly_summary,
 )
@@ -129,11 +129,12 @@ def setup_scheduler(application) -> AsyncIOScheduler:
             except Exception as e:
                 logger.warning("weekly summary failed %s: %s", user.get("telegram_id"), e)
 
-    # ── Goal deadline reminders (daily 10:00) ──
-    async def send_goal_reminders():
-        logger.info("scheduler: goal reminders")
+    # ── Goal progress pulse — every morning (09:00) and evening (21:00) ──
+    async def send_goal_pulse(part: str):
+        logger.info("scheduler: goal pulse (%s)", part)
         users = await get_all_users()
         today = now_local().date()
+        dkey = f"goal_pulse_{part}:{today.isoformat()}"
         for user in users:
             try:
                 if not notify_settings_of(user).get("goal_reminders"):
@@ -141,22 +142,14 @@ def setup_scheduler(application) -> AsyncIOScheduler:
                 tid = user["telegram_id"]
                 lang = user.get("language", "ru")
                 goals = await get_goals(tid)
-                for g in goals:
-                    if g.get("status") != "active" or not g.get("deadline"):
-                        continue
-                    try:
-                        dl = date.fromisoformat(str(g["deadline"])[:10])
-                    except (ValueError, TypeError):
-                        continue
-                    days_left = (dl - today).days
-                    # Nudge at 7 / 3 / 1 days out — each at most once per goal.
-                    if days_left in (7, 3, 1):
-                        key = f"goal_remind:{g['id']}:{days_left}"
-                        if not await mark_notif_sent(tid, "goal", key):
-                            continue
-                        await _send(tid, format_goal_reminder(g, lang, today=today))
+                text = format_goal_pulse(goals, lang, part=part, today=today)
+                if not text:  # no active goals → nothing to nudge about
+                    continue
+                if not await mark_notif_sent(tid, "goal_pulse", dkey):
+                    continue
+                await _send(tid, text)
             except Exception as e:
-                logger.warning("goal reminders failed %s: %s", user.get("telegram_id"), e)
+                logger.warning("goal pulse (%s) failed %s: %s", part, user.get("telegram_id"), e)
 
     scheduler.add_job(
         send_monthly_reports,
@@ -174,9 +167,14 @@ def setup_scheduler(application) -> AsyncIOScheduler:
         id="weekly_summaries", replace_existing=True,
     )
     scheduler.add_job(
-        send_goal_reminders,
-        trigger=CronTrigger(hour=10, minute=0),
-        id="goal_reminders", replace_existing=True,
+        send_goal_pulse, args=["morning"],
+        trigger=CronTrigger(hour=9, minute=0),
+        id="goal_pulse_morning", replace_existing=True,
+    )
+    scheduler.add_job(
+        send_goal_pulse, args=["evening"],
+        trigger=CronTrigger(hour=21, minute=0),
+        id="goal_pulse_evening", replace_existing=True,
     )
 
     logger.info("Scheduler configured (timezone: Asia/Tashkent)")

@@ -273,6 +273,105 @@ async def parse_photo_receipt(image_bytes: bytes, user_context: dict) -> dict:
         return {**_FALLBACK, "description": "Чек"}
 
 
+async def parse_goal_text(text: str, user_context: dict) -> dict:
+    """Extract a savings goal {title, amount, currency, deadline} from free text or
+    transcribed speech. Resolves relative deadlines ('к декабрю', 'через год')
+    against the supplied 'today'."""
+    lang = user_context.get("language", "ru")
+    base_currency = normalize_currency(user_context.get("currency"), DEFAULT_CURRENCY)
+    today = user_context.get("today", "")
+    codes_str = "/".join(CURRENCIES.keys())
+
+    if lang == "ru":
+        system_prompt = (
+            f"Извлеки данные цели накопления из сообщения. Сегодня {today}.\n"
+            "Верни строго JSON: title (короткое название цели, например «Отпуск»), "
+            "amount (целевая сумма — число), "
+            f"currency (ISO-код, одно из {codes_str}; по умолчанию {base_currency}), "
+            "deadline (дата в формате ГГГГ-ММ-ДД или null).\n"
+            "Относительные сроки («к декабрю», «через год», «до лета», «через 3 месяца») "
+            "преобразуй в конкретную дату относительно сегодняшней. "
+            "Суммы словами («десять миллионов», «полтора млн») переведи в число. "
+            "Если суммы нет — amount = 0.\n"
+            '{"title": "<строка>", "amount": <число>, "currency": "<ISO>", "deadline": "<ГГГГ-ММ-ДД|null>"}'
+        )
+    else:
+        system_prompt = (
+            f"Extract a savings-goal from the message. Today is {today}.\n"
+            "Return strictly JSON: title (short goal name e.g. 'Vacation'), "
+            "amount (target amount as a number), "
+            f"currency (ISO code, one of {codes_str}; default {base_currency}), "
+            "deadline (date YYYY-MM-DD or null).\n"
+            "Convert relative deadlines ('by December', 'in a year', 'in 3 months') to a concrete "
+            "date relative to today. Convert worded amounts into a number. If no amount — amount = 0.\n"
+            '{"title": "<string>", "amount": <number>, "currency": "<ISO>", "deadline": "<YYYY-MM-DD|null>"}'
+        )
+
+    raw = ""
+    try:
+        def _call():
+            return client.chat.completions.create(
+                model=TEXT_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text},
+                ],
+                temperature=0.1,
+                max_tokens=200,
+                response_format={"type": "json_object"},
+            )
+
+        response = await asyncio.to_thread(_call)
+        raw = response.choices[0].message.content
+        logger.info("parse_goal -> %s", raw[:200])
+        data = _extract_json(raw)
+        title = str(data.get("title") or "").strip()[:120]
+        amount = _to_float(data.get("amount"))
+        currency = normalize_currency(data.get("currency"), base_currency)
+        deadline = None
+        dl = data.get("deadline")
+        if dl and str(dl).lower() not in ("null", "none", ""):
+            try:
+                import datetime as _dt
+                deadline = _dt.date.fromisoformat(str(dl)[:10]).isoformat()
+            except ValueError:
+                deadline = None
+        return {"title": title, "amount": amount, "currency": currency, "deadline": deadline}
+    except Exception as e:
+        logger.error("parse_goal_text error: %s | raw=%s", e, raw[:200])
+        return {"title": "", "amount": 0.0, "currency": base_currency, "deadline": None}
+
+
+async def parse_amount_text(text: str, base_currency: str = DEFAULT_CURRENCY) -> float:
+    """Best-effort: turn a spoken/worded amount ('двести тысяч', 'five hundred')
+    into a number. Used as a fallback when plain digit parsing fails (e.g. voice)."""
+    raw = ""
+    try:
+        def _call():
+            return client.chat.completions.create(
+                model=TEXT_MODEL,
+                messages=[
+                    {"role": "system", "content": (
+                        "Extract the monetary amount from the message as a plain number. "
+                        "Convert worded amounts (e.g. 'двести тысяч', 'десять миллионов', "
+                        "'five hundred') into digits. Reply strictly JSON: {\"amount\": <number>}. "
+                        "If there is no amount, return 0."
+                    )},
+                    {"role": "user", "content": text},
+                ],
+                temperature=0.0,
+                max_tokens=60,
+                response_format={"type": "json_object"},
+            )
+
+        response = await asyncio.to_thread(_call)
+        raw = response.choices[0].message.content
+        return _to_float(_extract_json(raw).get("amount"))
+    except Exception as e:
+        logger.error("parse_amount_text error: %s | raw=%s", e, raw[:120])
+        return 0.0
+
+
 async def get_savings_tips(monthly_data: list, language: str, currency: str = DEFAULT_CURRENCY) -> str:
     if not monthly_data:
         return ""

@@ -41,6 +41,8 @@ from services.currency_service import (
 )
 from services.groq_service import (
     get_savings_tips,
+    parse_amount_text,
+    parse_goal_text,
     parse_photo_receipt,
     parse_text_purchase,
     transcribe_audio,
@@ -175,6 +177,23 @@ def _guess_goal_emoji(title: str) -> str:
         if any(k in low for k in keys):
             return emo
     return "🎯"
+
+
+def _parse_goal_structured(text: str):
+    """Parse a typed goal in the 'Название · сумма · срок' format.
+    Returns (title, amount, deadline_iso|None); amount=0 if it doesn't fit."""
+    parts = [p.strip() for p in re.split(r"[·;|\n]+", text) if p.strip()]
+    if len(parts) < 2:
+        return "", 0.0, None
+    title = parts[0][:120]
+    amount = _parse_money(parts[1])
+    deadline = None
+    if len(parts) >= 3:
+        try:
+            deadline = datetime.strptime(parts[2][:10], "%Y-%m-%d").date().isoformat()
+        except ValueError:
+            deadline = None
+    return title, amount, deadline
 
 
 async def _build_context(user: dict, user_id: int):
@@ -705,21 +724,19 @@ async def _handle_pending_text(update: Update, context: ContextTypes.DEFAULT_TYP
     ptype = pend.get("type")
 
     if ptype == "goal_new":
-        parts = [p.strip() for p in re.split(r"[·;|\n]+", text) if p.strip()]
-        if len(parts) < 2:
+        # Fast path: typed "Название · сумма · срок". Falls back to the LLM for
+        # natural language / transcribed speech ("Отпуск, десять миллионов, к декабрю").
+        title, amount, deadline = _parse_goal_structured(text)
+        if not (title and amount > 0):
+            gd = await parse_goal_text(
+                text, {"language": lang, "currency": base_currency, "today": now_local().date().isoformat()}
+            )
+            title = (gd.get("title") or title or "").strip()[:120]
+            amount = gd.get("amount") or amount
+            deadline = gd.get("deadline") or deadline
+        if not title or not amount or amount <= 0:
             await update.message.reply_text(t("goal_create_invalid", lang), parse_mode="HTML")
             return True  # keep pending so the user can retry
-        title = parts[0][:120]
-        amount = _parse_money(parts[1])
-        if amount <= 0:
-            await update.message.reply_text(t("goal_create_invalid", lang), parse_mode="HTML")
-            return True
-        deadline = None
-        if len(parts) >= 3:
-            try:
-                deadline = datetime.strptime(parts[2][:10], "%Y-%m-%d").date().isoformat()
-            except ValueError:
-                deadline = None
         emoji = _guess_goal_emoji(title)
         goal = await create_goal(user_id, title, amount, base_currency, emoji=emoji, deadline=deadline)
         context.user_data.pop("await", None)
@@ -736,6 +753,8 @@ async def _handle_pending_text(update: Update, context: ContextTypes.DEFAULT_TYP
 
     if ptype == "goal_add":
         amount = _parse_money(text)
+        if amount <= 0:  # voice / worded amount → ask the LLM to read the number
+            amount = await parse_amount_text(text, base_currency)
         if amount <= 0:
             await update.message.reply_text(t("goal_contribute_invalid", lang), parse_mode="HTML")
             return True
@@ -1215,6 +1234,12 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text(
             t("voice_transcribed", lang, text=escape(transcribed)), parse_mode="HTML"
         )
+        # A pending goal flow (create / contribute) can be driven by voice too.
+        pend = context.user_data.get("await")
+        if pend:
+            await _typing(update)
+            if await _handle_pending_text(update, context, pend, transcribed):
+                return
         await _typing(update)
         user_context, budget, prior_spent, currency, prior_avg = await _build_context(user, user_id)
         result = await parse_text_purchase(transcribed, user_context)
@@ -1248,6 +1273,11 @@ async def audio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text(
             t("voice_transcribed", lang, text=escape(transcribed)), parse_mode="HTML"
         )
+        pend = context.user_data.get("await")
+        if pend:
+            await _typing(update)
+            if await _handle_pending_text(update, context, pend, transcribed):
+                return
         await _typing(update)
         user_context, budget, prior_spent, currency, prior_avg = await _build_context(user, user_id)
         result = await parse_text_purchase(transcribed, user_context)

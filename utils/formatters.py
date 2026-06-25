@@ -705,6 +705,41 @@ def format_weekly_summary(total: float, n: int, top3: list, prev_total: float | 
     return "\n".join(lines)
 
 
+def format_goal_pulse(goals: list, lang: str, part: str = "morning", today: date | None = None) -> str:
+    """Twice-daily (morning/evening) digest of all active goals with progress + pace.
+    Returns '' if there are no active goals (caller should skip sending)."""
+    active = [g for g in goals if g.get("status") == "active"]
+    if not active:
+        return ""
+    if lang == "ru":
+        head = "☀️ <b>Доброе утро!</b>" if part == "morning" else "🌙 <b>Добрый вечер!</b>"
+        sub = "Не забывай про свои цели 🎯" if part == "morning" else "Как продвигаются твои цели 🎯"
+    else:
+        head = "☀️ <b>Good morning!</b>" if part == "morning" else "🌙 <b>Good evening!</b>"
+        sub = "Don't forget your goals 🎯" if part == "morning" else "How your goals are going 🎯"
+    lines = [f"{head} {sub}", DIVIDER, ""]
+    for g in active:
+        cur = g.get("currency") or DEFAULT_CURRENCY
+        p = goal_progress(g, today)
+        emoji = g.get("emoji") or "🎯"
+        title = escape(str(g.get("title", "")))
+        lines.append(f"{emoji} <b>{title}</b>  ·  {p['percent']:.0f}%")
+        lines.append(f"<code>{_bar(min(p['percent'], 100), 16)}</code>")
+        sub2 = f"{_f(p['saved'], cur)} / {_f(p['target'], cur)}"
+        if p["days_left"] is not None and p["days_left"] >= 0:
+            dleft = _days_label(p["days_left"], lang)
+            if p["per_day"]:
+                sub2 += (f" · ещё {dleft} · ≈ {_f(p['per_day'], cur)}/день"
+                         if lang == "ru" else f" · {dleft} left · ≈ {_f(p['per_day'], cur)}/day")
+            else:
+                sub2 += (f" · ещё {dleft}" if lang == "ru" else f" · {dleft} left")
+        elif p["overdue"]:
+            sub2 += " · ⏰ срок прошёл" if lang == "ru" else " · ⏰ overdue"
+        lines.append(f"<i>{sub2}</i>")
+        lines.append("")
+    return "\n".join(lines).rstrip()
+
+
 def format_goal_reminder(goal: dict, lang: str, today: date | None = None) -> str:
     cur = goal.get("currency") or DEFAULT_CURRENCY
     p = goal_progress(goal, today)
