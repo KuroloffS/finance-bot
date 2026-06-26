@@ -21,7 +21,9 @@
 ### 🗄 Миграция БД (нужна для новых функций)
 Схема расширяется аддитивно (новые таблицы `goals`, `goal_contributions`,
 `notifications_log` + nullable-колонки). **На текущем проекте уже применена.** Для новой/чистой
-базы выполни SQL из `db/migrations/002_goals_notifications_currency.sql` в Supabase → SQL Editor.
+базы выполни SQL по порядку в Supabase → SQL Editor: сначала
+`db/migrations/001_initial_schema.sql` (базовые таблицы `users`, `transactions`
+и view `monthly_summary`), затем `db/migrations/002_goals_notifications_currency.sql`.
 Новых переменных окружения не требуется — курсы валют берутся с бесключевого API.
 
 ## 📱 Чтобы заработал Mini App (обязательно)

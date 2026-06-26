@@ -4,12 +4,13 @@ Serves the single-page web app and a small JSON API. Every /api route is
 authenticated with Telegram initData (see web/auth.py); the user identity is
 taken only from the verified payload.
 """
+import asyncio
 import logging
 import os
 from datetime import datetime
 from pathlib import Path
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Request
+from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -28,14 +29,12 @@ from services.supabase_service import (
     delete_goal,
     delete_transaction,
     get_daily_spent_last_n,
-    get_goal,
     get_goals,
     get_month_spent_through_day,
     get_monthly_summary,
     get_monthly_summary_for,
     get_or_create_user,
     get_transactions_for_month,
-    make_budget_status,
     notify_settings_of,
     now_local,
     save_transaction,
@@ -158,17 +157,22 @@ def create_app() -> FastAPI:
         budget = _f(user.get("monthly_budget", DEFAULT_BUDGET))
         month_first, ref, is_current, y, m = _month_bounds(month)
 
-        summary = await get_monthly_summary_for(uid, month_first)
-
         sparkline = None
         prev_through = None
         trend30 = None
         if is_current:
-            sparkline = await get_daily_spent_last_n(uid, 7)
-            trend30 = await get_daily_spent_last_n(uid, 30)
             pm = m - 1 or 12
             py = y if m > 1 else y - 1
-            prev_through = await get_month_spent_through_day(uid, py, pm, ref.day)
+            # Independent reads in parallel; the 7-day sparkline is the tail of the
+            # 30-day trend, so we derive it instead of issuing a second daily query.
+            summary, trend30, prev_through = await asyncio.gather(
+                get_monthly_summary_for(uid, month_first),
+                get_daily_spent_last_n(uid, 30),
+                get_month_spent_through_day(uid, py, pm, ref.day),
+            )
+            sparkline = trend30[-7:]
+        else:
+            summary = await get_monthly_summary_for(uid, month_first)
 
         a = compute_analytics(
             summary, budget, ref,

@@ -136,10 +136,5 @@ async def convert(amount: float, from_cur: str, to_cur: str) -> float:
     return usd * per_usd_to
 
 
-async def get_rate(from_cur: str, to_cur: str) -> float:
-    """How many `to_cur` units one `from_cur` unit is worth."""
-    return await convert(1.0, from_cur, to_cur)
-
-
 def currency_meta(code: str) -> dict:
     return CURRENCIES.get(normalize_currency(code), CURRENCIES[DEFAULT_CURRENCY])

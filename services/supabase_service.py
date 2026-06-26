@@ -466,27 +466,6 @@ async def update_notify_settings(user_id: int, settings: dict) -> dict:
 
 # ───────────────────────── Notification dedup log ─────────────────────────
 
-async def notif_already_sent(user_id: int, dedup_key: str) -> bool:
-    """True if a notification with this dedup_key was already logged for the user."""
-    try:
-        def _select():
-            return (
-                get_client()
-                .table("notifications_log")
-                .select("id")
-                .eq("user_id", user_id)
-                .eq("dedup_key", dedup_key)
-                .limit(1)
-                .execute()
-            )
-
-        result = await asyncio.to_thread(_select)
-        return bool(result and result.data)
-    except Exception as e:
-        logger.error("notif_already_sent error user_id=%s key=%s: %s", user_id, dedup_key, e)
-        return False
-
-
 async def mark_notif_sent(user_id: int, ntype: str, dedup_key: str) -> bool:
     """Record that a notification was sent. Returns True on first insert, False if
     it already existed (unique constraint) — lets callers treat this as a claim."""
@@ -744,6 +723,26 @@ async def delete_last_transaction(user_id: int) -> dict:
     except Exception as e:
         logger.error("delete_last_transaction error user_id=%s: %s", user_id, e)
         return {}
+
+
+async def count_transactions(user_id: int) -> int:
+    """Number of transactions for the user — count-only query (no row payload)."""
+    try:
+        def _count():
+            return (
+                get_client()
+                .table("transactions")
+                .select("id", count="exact")
+                .eq("user_id", user_id)
+                .limit(1)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_count)
+        return result.count if (result and result.count is not None) else 0
+    except Exception as e:
+        logger.error("count_transactions error user_id=%s: %s", user_id, e)
+        return 0
 
 
 async def delete_all_transactions(user_id: int) -> int:

@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 import re
@@ -49,6 +50,7 @@ from services.groq_service import (
 )
 from services.supabase_service import (
     add_goal_contribution,
+    count_transactions,
     create_goal,
     delete_all_transactions,
     delete_goal,
@@ -59,7 +61,6 @@ from services.supabase_service import (
     get_goal,
     get_goals,
     get_last_transactions,
-    get_month_spent,
     get_month_spent_through_day,
     get_monthly_summary,
     get_monthly_summary_for,
@@ -83,13 +84,11 @@ from utils.formatters import (
     format_amount,
     format_analytics_card,
     format_budget_alert,
-    format_budget_status,
     format_goal_card,
     format_goals_list,
     format_history,
     format_large_tx_alert,
     format_monthly_report,
-    format_progress_bar,
     format_saved_card,
     format_tips,
     goal_progress,
@@ -196,11 +195,14 @@ def _parse_goal_structured(text: str):
     return title, amount, deadline
 
 
-async def _build_context(user: dict, user_id: int):
-    """One DB query (monthly summary). Returns (user_context, budget, prior_spent, currency, prior_avg)."""
+async def _build_context(user: dict, user_id: int, summary: list | None = None):
+    """Returns (user_context, budget, prior_spent, currency, prior_avg).
+    Pass `summary` if already fetched (e.g. concurrently with the user row) to
+    skip the monthly-summary query."""
     budget = _budget_of(user)
     currency = _currency_of(user)
-    summary = await get_monthly_summary(user_id)
+    if summary is None:
+        summary = await get_monthly_summary(user_id)
     spent = sum(float(r.get("total_spent", 0)) for r in summary)
     count = sum(int(r.get("num_transactions", 0)) for r in summary)
     avg = spent / count if count else 0.0
@@ -223,6 +225,7 @@ async def _save_and_reply(
     budget: float,
     prior_spent: float,
     currency: str,
+    user: dict,
     prior_avg: float = 0.0,
 ) -> None:
     """Persist a parsed purchase (converting currency if needed) and reply with a
@@ -271,21 +274,17 @@ async def _save_and_reply(
     await _send_alerts(
         context, update.effective_chat.id, user_id, lang, currency,
         budget, prior_spent, spent_after, base_amount,
-        result.get("category", ""), prior_avg,
+        result.get("category", ""), prior_avg, user,
     )
 
 
 async def _send_alerts(
     context, chat_id, user_id, lang, currency,
-    budget, prior_spent, spent_after, base_amount, category, prior_avg,
+    budget, prior_spent, spent_after, base_amount, category, prior_avg, user,
 ):
-    """Fire real-time alerts after a save. Settings are re-fetched fresh to honour toggles."""
-    try:
-        from services.supabase_service import get_user
-        user = await get_user(user_id)
-        settings = notify_settings_of(user)
-    except Exception:
-        settings = notify_settings_of({})
+    """Fire real-time alerts after a save, honouring the user's notify toggles
+    (reusing the user row already loaded by the handler — no extra DB round-trip)."""
+    settings = notify_settings_of(user)
 
     month_key = now_local().strftime("%Y-%m")
 
@@ -333,17 +332,21 @@ async def _analytics_payload(user_id: int, budget: float, lang: str, currency: s
     is_current = offset == 0
     month_first = f"{year}-{month:02d}-01"
 
-    summary = await get_monthly_summary_for(user_id, month_first)
-
     sparkline = None
     prev_through = None
-    ref = datetime(year, month, 1)
     if is_current:
         ref = now
-        sparkline = await get_daily_spent_last_n(user_id, 7)
         pm = month - 1 or 12
         py = year if month > 1 else year - 1
-        prev_through = await get_month_spent_through_day(user_id, py, pm, now.day)
+        # Three independent reads — run them concurrently.
+        summary, sparkline, prev_through = await asyncio.gather(
+            get_monthly_summary_for(user_id, month_first),
+            get_daily_spent_last_n(user_id, 7),
+            get_month_spent_through_day(user_id, py, pm, now.day),
+        )
+    else:
+        ref = datetime(year, month, 1)
+        summary = await get_monthly_summary_for(user_id, month_first)
 
     a = compute_analytics(
         summary, budget, ref,
@@ -679,8 +682,7 @@ async def reset_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         user_id = update.effective_user.id
         logger.info("reset telegram_id=%s", user_id)
 
-        transactions = await get_last_transactions(user_id, 1000)
-        n = len(transactions)
+        n = await count_transactions(user_id)
         if n == 0:
             await update.message.reply_text(t("reset_empty", lang), parse_mode="HTML")
             return
@@ -1032,8 +1034,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
         if data == "reset:ask":
             await query.answer()
-            transactions = await get_last_transactions(user_id, 1000)
-            n = len(transactions)
+            n = await count_transactions(user_id)
             if n == 0:
                 await query.message.reply_text(t("reset_empty", lang), parse_mode="HTML")
                 return
@@ -1201,15 +1202,16 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             await _ROUTE_FUNCS[route](update, context)
             return
 
-        user = await _get_user(update)
-        lang = user.get("language", "ru")
         user_id = update.effective_user.id
         logger.info("text message telegram_id=%s", user_id)
 
         await _typing(update)
-        user_context, budget, prior_spent, currency, prior_avg = await _build_context(user, user_id)
+        # User row and month summary are independent — fetch them concurrently.
+        user, summary = await asyncio.gather(_get_user(update), get_monthly_summary(user_id))
+        lang = user.get("language", "ru")
+        user_context, budget, prior_spent, currency, prior_avg = await _build_context(user, user_id, summary)
         result = await parse_text_purchase(label, user_context)
-        await _save_and_reply(update, context, result, lang, user_id, "text", budget, prior_spent, currency, prior_avg)
+        await _save_and_reply(update, context, result, lang, user_id, "text", budget, prior_spent, currency, user, prior_avg)
     except Exception as e:
         logger.error("text_handler error: %s", e)
         await update.message.reply_text(t("error_generic", "ru"))
@@ -1243,7 +1245,7 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _typing(update)
         user_context, budget, prior_spent, currency, prior_avg = await _build_context(user, user_id)
         result = await parse_text_purchase(transcribed, user_context)
-        await _save_and_reply(update, context, result, lang, user_id, "voice", budget, prior_spent, currency, prior_avg)
+        await _save_and_reply(update, context, result, lang, user_id, "voice", budget, prior_spent, currency, user, prior_avg)
     except Exception as e:
         logger.error("voice_handler error: %s", e)
         await update.message.reply_text(t("error_generic", "ru"))
@@ -1281,7 +1283,7 @@ async def audio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await _typing(update)
         user_context, budget, prior_spent, currency, prior_avg = await _build_context(user, user_id)
         result = await parse_text_purchase(transcribed, user_context)
-        await _save_and_reply(update, context, result, lang, user_id, "audio", budget, prior_spent, currency, prior_avg)
+        await _save_and_reply(update, context, result, lang, user_id, "audio", budget, prior_spent, currency, user, prior_avg)
     except Exception as e:
         logger.error("audio_handler error: %s", e)
         await update.message.reply_text(t("error_generic", "ru"))
@@ -1303,7 +1305,7 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
         user_context, budget, prior_spent, currency, prior_avg = await _build_context(user, user_id)
         result = await parse_photo_receipt(image_bytes, user_context)
-        await _save_and_reply(update, context, result, lang, user_id, "photo", budget, prior_spent, currency, prior_avg)
+        await _save_and_reply(update, context, result, lang, user_id, "photo", budget, prior_spent, currency, user, prior_avg)
     except Exception as e:
         logger.error("photo_handler error: %s", e)
         await update.message.reply_text(t("error_generic", "ru"))

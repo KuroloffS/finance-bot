@@ -42,7 +42,6 @@ _WEEKDAYS_EN = {
 }
 
 DIVIDER = "━━━━━━━━━━━━━━━━━━━"
-_DIVIDER = DIVIDER  # backward-compat alias
 
 _SPARK = "▁▂▃▄▅▆▇█"
 
@@ -738,24 +737,3 @@ def format_goal_pulse(goals: list, lang: str, part: str = "morning", today: date
         lines.append(f"<i>{sub2}</i>")
         lines.append("")
     return "\n".join(lines).rstrip()
-
-
-def format_goal_reminder(goal: dict, lang: str, today: date | None = None) -> str:
-    cur = goal.get("currency") or DEFAULT_CURRENCY
-    p = goal_progress(goal, today)
-    emoji = goal.get("emoji") or "🎯"
-    title = escape(str(goal.get("title", "")))
-    head = "🎯 <b>Напоминание о цели</b>" if lang == "ru" else "🎯 <b>Goal reminder</b>"
-    lines = [head, DIVIDER, "", f"{emoji} <b>{title}</b>",
-             f"{goal_dot(p['percent'])} <code>{format_progress_bar(min(p['percent'], 100))}</code>"]
-    if p["days_left"] is not None and p["days_left"] >= 0:
-        dleft = _days_label(p["days_left"], lang)
-        if lang == "ru":
-            lines.append(f"Осталось {dleft}, накоплено {_f(p['saved'], cur)} из {_f(p['target'], cur)}.")
-            if p["per_day"]:
-                lines.append(f"💪 Откладывай ≈ {_f(p['per_day'], cur)}/день — и успеешь!")
-        else:
-            lines.append(f"{dleft} left, saved {_f(p['saved'], cur)} of {_f(p['target'], cur)}.")
-            if p["per_day"]:
-                lines.append(f"💪 Put aside ≈ {_f(p['per_day'], cur)}/day to make it!")
-    return "\n".join(lines)

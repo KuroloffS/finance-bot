@@ -197,11 +197,6 @@ async def transcribe_audio(audio_bytes: bytes, filename: str = "audio.ogg") -> s
             pass
 
 
-# Backward-compatible alias
-async def transcribe_voice(ogg_bytes: bytes) -> str:
-    return await transcribe_audio(ogg_bytes, "voice.ogg")
-
-
 async def parse_photo_receipt(image_bytes: bytes, user_context: dict) -> dict:
     raw = ""
     try:
