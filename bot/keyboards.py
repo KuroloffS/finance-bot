@@ -239,7 +239,7 @@ def currency_keyboard(current: str = "UZS", lang: str = "ru") -> InlineKeyboardM
 # ───────────────────────── Notification settings ─────────────────────────
 
 # Display order + labels for the toggle list. Keys match DEFAULT_NOTIFY.
-NOTIFY_ORDER = ["budget_alerts", "large_tx", "weekly_summary", "daily_digest", "goal_reminders"]
+NOTIFY_ORDER = ["budget_alerts", "large_tx", "weekly_summary", "daily_digest", "goal_reminders", "debt_reminders"]
 NOTIFY_LABELS = {
     "ru": {
         "budget_alerts": "Бюджет: 80% и 100%",
@@ -247,6 +247,7 @@ NOTIFY_LABELS = {
         "weekly_summary": "Итоги недели",
         "daily_digest": "Итоги дня",
         "goal_reminders": "Напоминания о целях",
+        "debt_reminders": "Напоминания о долгах",
     },
     "en": {
         "budget_alerts": "Budget: 80% & 100%",
@@ -254,6 +255,7 @@ NOTIFY_LABELS = {
         "weekly_summary": "Weekly summary",
         "daily_digest": "Daily wrap-up",
         "goal_reminders": "Goal reminders",
+        "debt_reminders": "Debt reminders",
     },
 }
 

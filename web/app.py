@@ -7,7 +7,7 @@ taken only from the verified payload.
 import asyncio
 import logging
 import os
-from datetime import datetime
+from datetime import date, datetime
 from pathlib import Path
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -24,11 +24,14 @@ from services.currency_service import (
 from services.groq_service import get_savings_tips, parse_text_purchase
 from services.supabase_service import (
     add_goal_contribution,
+    create_debt,
     create_goal,
     delete_all_transactions,
+    delete_debt,
     delete_goal,
     delete_transaction,
     get_daily_spent_last_n,
+    get_debts,
     get_goals,
     get_month_spent_through_day,
     get_monthly_summary,
@@ -38,6 +41,7 @@ from services.supabase_service import (
     notify_settings_of,
     now_local,
     save_transaction,
+    settle_debt,
     update_budget,
     update_currency,
     update_goal,
@@ -451,6 +455,90 @@ def create_app() -> FastAPI:
         ok = await delete_goal(user["telegram_id"], goal_id)
         if not ok:
             raise HTTPException(status_code=404, detail="goal not found")
+        return {"ok": True}
+
+    # ───────────────────────── Debts / loans ─────────────────────────
+
+    def _debt_dto(d: dict, today) -> dict:
+        due = d.get("due_date")
+        days_left = None
+        overdue = False
+        if due:
+            try:
+                dl = date.fromisoformat(str(due)[:10])
+                days_left = (dl - today).days
+                overdue = days_left < 0
+            except (ValueError, TypeError):
+                pass
+        return {
+            "id": d.get("id"),
+            "direction": d.get("direction", "owed_to_me"),
+            "counterparty": d.get("counterparty", ""),
+            "amount": _f(d.get("amount")),
+            "currency": normalize_currency(d.get("currency"), DEFAULT_CURRENCY),
+            "due_date": str(due)[:10] if due else None,
+            "status": d.get("status", "open"),
+            "note": d.get("note") or "",
+            "days_left": days_left,
+            "overdue": overdue,
+        }
+
+    @app.get("/api/debts")
+    async def api_debts(user: dict = Depends(current_user)):
+        uid = user["telegram_id"]
+        today = now_local().date()
+        base = normalize_currency(user.get("currency"), DEFAULT_CURRENCY)
+        debts = await get_debts(uid)
+        owed = owe = 0.0
+        for d in debts:
+            if d.get("status") != "open":
+                continue
+            amt = await convert(float(d.get("amount") or 0), normalize_currency(d.get("currency"), base), base)
+            if d.get("direction") == "i_owe":
+                owe += amt
+            else:
+                owed += amt
+        return {
+            "debts": [_debt_dto(d, today) for d in debts],
+            "summary": {"owed_to_me": owed, "i_owe": owe, "net": owed - owe, "currency": base},
+        }
+
+    class NewDebt(BaseModel):
+        direction: str
+        counterparty: str
+        amount: float
+        currency: str | None = None
+        due_date: str | None = None
+        note: str | None = None
+
+    @app.post("/api/debts")
+    async def api_create_debt(b: NewDebt, user: dict = Depends(current_user)):
+        if b.amount is None or b.amount <= 0:
+            raise HTTPException(status_code=400, detail="amount must be > 0")
+        if not (b.counterparty or "").strip():
+            raise HTTPException(status_code=400, detail="counterparty required")
+        cur = normalize_currency(b.currency, normalize_currency(user.get("currency"), DEFAULT_CURRENCY))
+        direction = b.direction if b.direction in ("owed_to_me", "i_owe") else "owed_to_me"
+        d = await create_debt(
+            user["telegram_id"], direction, b.counterparty, float(b.amount), cur,
+            due_date=b.due_date, note=b.note,
+        )
+        if not d:
+            raise HTTPException(status_code=500, detail="could not create debt")
+        return {"ok": True, "debt": _debt_dto(d, now_local().date())}
+
+    @app.post("/api/debts/{debt_id}/settle")
+    async def api_settle_debt(debt_id: int, user: dict = Depends(current_user)):
+        d = await settle_debt(user["telegram_id"], debt_id)
+        if not d:
+            raise HTTPException(status_code=404, detail="debt not found")
+        return {"ok": True, "debt": _debt_dto(d, now_local().date())}
+
+    @app.delete("/api/debts/{debt_id}")
+    async def api_delete_debt(debt_id: int, user: dict = Depends(current_user)):
+        ok = await delete_debt(user["telegram_id"], debt_id)
+        if not ok:
+            raise HTTPException(status_code=404, detail="debt not found")
         return {"ok": True}
 
     return app

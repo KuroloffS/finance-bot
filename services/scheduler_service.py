@@ -9,6 +9,7 @@ from services.currency_service import DEFAULT_CURRENCY, normalize_currency
 from services.supabase_service import (
     get_all_users,
     get_budget_status,
+    get_debts,
     get_goals,
     get_monthly_summary,
     get_transactions_in_range,
@@ -18,6 +19,7 @@ from services.supabase_service import (
 )
 from utils.formatters import (
     format_daily_digest,
+    format_debt_reminder,
     format_goal_pulse,
     format_monthly_report,
     format_weekly_summary,
@@ -166,10 +168,37 @@ def setup_scheduler(application) -> AsyncIOScheduler:
         trigger=CronTrigger(day_of_week="sun", hour=20, minute=0),
         id="weekly_summaries", replace_existing=True,
     )
+    # ── Debt/loan reminders — daily (10:00), debts due ≤3 days or overdue ──
+    async def send_debt_reminders():
+        logger.info("scheduler: debt reminders")
+        users = await get_all_users()
+        today = now_local().date()
+        dkey = f"debt_reminder:{today.isoformat()}"
+        for user in users:
+            try:
+                if not notify_settings_of(user).get("debt_reminders"):
+                    continue
+                tid = user["telegram_id"]
+                lang = user.get("language", "ru")
+                debts = await get_debts(tid, only_open=True)
+                text = format_debt_reminder(debts, lang, today=today)
+                if not text:  # nothing due soon → don't nag
+                    continue
+                if not await mark_notif_sent(tid, "debt", dkey):
+                    continue
+                await _send(tid, text)
+            except Exception as e:
+                logger.warning("debt reminder failed %s: %s", user.get("telegram_id"), e)
+
     scheduler.add_job(
         send_goal_pulse, args=["morning"],
         trigger=CronTrigger(hour=9, minute=0),
         id="goal_pulse_morning", replace_existing=True,
+    )
+    scheduler.add_job(
+        send_debt_reminders,
+        trigger=CronTrigger(hour=10, minute=0),
+        id="debt_reminders", replace_existing=True,
     )
     scheduler.add_job(
         send_goal_pulse, args=["evening"],

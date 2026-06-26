@@ -431,6 +431,7 @@ DEFAULT_NOTIFY = {
     "daily_digest": False,    # evening recap of the day
     "weekly_summary": True,   # Sunday week recap
     "goal_reminders": True,   # savings-goal deadline nudges
+    "debt_reminders": True,   # debt/loan due-date nudges
 }
 
 
@@ -743,6 +744,107 @@ async def count_transactions(user_id: int) -> int:
     except Exception as e:
         logger.error("count_transactions error user_id=%s: %s", user_id, e)
         return 0
+
+
+# ───────────────────────── Debts / loans ─────────────────────────
+
+async def create_debt(
+    user_id: int,
+    direction: str,
+    counterparty: str,
+    amount: float,
+    currency: str,
+    due_date: str | None = None,
+    note: str | None = None,
+) -> dict:
+    """Create a debt. direction = 'owed_to_me' (they owe me) | 'i_owe' (I owe)."""
+    try:
+        dd = None
+        if due_date:
+            try:
+                dd = date.fromisoformat(str(due_date)[:10]).isoformat()
+            except ValueError:
+                dd = None
+        if direction not in ("owed_to_me", "i_owe"):
+            direction = "owed_to_me"
+
+        def _insert():
+            return (
+                get_client()
+                .table("debts")
+                .insert({
+                    "user_id": user_id,
+                    "direction": direction,
+                    "counterparty": (counterparty or "").strip()[:120] or "—",
+                    "amount": float(amount),
+                    "currency": currency,
+                    "due_date": dd,
+                    "note": (note or "").strip() or None,
+                    "status": "open",
+                })
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_insert)
+        return result.data[0] if (result and result.data) else {}
+    except Exception as e:
+        logger.error("create_debt error user_id=%s: %s", user_id, e)
+        return {}
+
+
+async def get_debts(user_id: int, only_open: bool = False) -> list[dict]:
+    """Debts for a user. Open first, then by nearest due date."""
+    try:
+        def _select():
+            q = get_client().table("debts").select("*").eq("user_id", user_id)
+            if only_open:
+                q = q.eq("status", "open")
+            return q.order("status", desc=False).order("due_date", desc=False, nullsfirst=False).execute()
+
+        result = await asyncio.to_thread(_select)
+        return result.data if (result and result.data) else []
+    except Exception as e:
+        logger.error("get_debts error user_id=%s: %s", user_id, e)
+        return []
+
+
+async def settle_debt(user_id: int, debt_id: int) -> dict:
+    """Mark a debt as settled (paid back). Returns the updated row or {}."""
+    try:
+        def _update():
+            return (
+                get_client()
+                .table("debts")
+                .update({"status": "settled"})
+                .eq("id", debt_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_update)
+        return result.data[0] if (result and result.data) else {}
+    except Exception as e:
+        logger.error("settle_debt error user_id=%s id=%s: %s", user_id, debt_id, e)
+        return {}
+
+
+async def delete_debt(user_id: int, debt_id: int) -> bool:
+    try:
+        def _delete():
+            return (
+                get_client()
+                .table("debts")
+                .delete()
+                .eq("id", debt_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_delete)
+        return bool(result and result.data)
+    except Exception as e:
+        logger.error("delete_debt error user_id=%s id=%s: %s", user_id, debt_id, e)
+        return False
 
 
 async def delete_all_transactions(user_id: int) -> int:

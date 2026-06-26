@@ -58,6 +58,7 @@ from services.supabase_service import (
     delete_transaction,
     get_budget_status,
     get_daily_spent_last_n,
+    get_debts,
     get_goal,
     get_goals,
     get_last_transactions,
@@ -78,12 +79,12 @@ from services.supabase_service import (
 )
 from utils.formatters import (
     CATEGORY_EMOJI,
-    _bar,
     compute_analytics,
     count_label,
     format_amount,
     format_analytics_card,
     format_budget_alert,
+    format_debts_list,
     format_goal_card,
     format_goals_list,
     format_history,
@@ -92,7 +93,6 @@ from utils.formatters import (
     format_saved_card,
     format_tips,
     goal_progress,
-    build_saved_pace,
 )
 from utils.i18n import t
 
@@ -264,8 +264,7 @@ async def _save_and_reply(
 
     spent_after = prior_spent + base_amount
     status = make_budget_status(budget, spent_after)
-    pace = build_saved_pace(budget, spent_after, now_local(), lang, currency=currency)
-    card = format_saved_card(result, status, lang, input_type, pace=pace, currency=currency, fx_note=fx_note)
+    card = format_saved_card(result, status, lang, input_type, currency=currency, fx_note=fx_note)
     await update.message.reply_text(
         card, parse_mode="HTML", reply_markup=saved_card_keyboard(tx_id, lang)
     )
@@ -467,9 +466,10 @@ async def budget_view_handler(update: Update, context: ContextTypes.DEFAULT_TYPE
         budget = _budget_of(user)
         currency = _currency_of(user)
         status = await get_budget_status(user_id, budget=budget)
-        from utils.formatters import _gauge_line
+        from utils.formatters import zone_dot
+        pct = status["percent"]
         await update.message.reply_text(
-            t("budget_view", lang, amount=format_amount(budget, currency), gauge=_gauge_line(status["percent"])),
+            t("budget_view", lang, amount=format_amount(budget, currency), gauge=f"{zone_dot(pct)} {pct:.1f}%"),
             parse_mode="HTML",
             reply_markup=budget_presets_keyboard(lang),
         )
@@ -600,6 +600,22 @@ async def goals_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         await update.message.reply_text(t("error_generic", "ru"))
 
 
+async def debts_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        user = await _get_user(update)
+        lang = user.get("language", "ru")
+        user_id = update.effective_user.id
+        logger.info("debts telegram_id=%s", user_id)
+        debts = await get_debts(user_id)
+        text = format_debts_list(debts, lang, today=now_local().date())
+        url = _webapp_url()
+        kb = webapp_keyboard(url, lang) if url else None
+        await update.message.reply_text(text, parse_mode="HTML", reply_markup=kb)
+    except Exception as e:
+        logger.error("debts_handler error: %s", e)
+        await update.message.reply_text(t("error_generic", "ru"))
+
+
 async def currency_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         user = await _get_user(update)
@@ -712,7 +728,6 @@ def _goal_contributed_text(goal: dict, amount: float, lang: str) -> str:
         "goal_contributed", lang,
         amount=format_amount(amount, cur),
         title=escape(str(goal.get("title", ""))),
-        bar=_bar(min(p["percent"], 100), 16),
         pct=f"{p['percent']:.0f}",
     )
 
@@ -1329,6 +1344,7 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("help", help_handler))
     application.add_handler(CommandHandler("budget", budget_handler))
     application.add_handler(CommandHandler("goals", goals_handler))
+    application.add_handler(CommandHandler("debts", debts_handler))
     application.add_handler(CommandHandler("currency", currency_handler))
     application.add_handler(CommandHandler("settings", settings_handler))
     application.add_handler(CommandHandler("report", report_handler))

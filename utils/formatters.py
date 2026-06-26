@@ -149,25 +149,6 @@ def goal_dot(percent: float) -> str:
     return "🔵"
 
 
-def format_progress_bar(percent: float, length: int = 16) -> str:
-    """█████░░░░░░░░░░░ 31.2%"""
-    pct = max(0.0, float(percent))
-    filled = min(length, int(round(length * min(pct, 100) / 100)))
-    bar = "█" * filled + "░" * (length - filled)
-    return f"{bar} {pct:.1f}%"
-
-
-def _bar(percent: float, length: int = 10) -> str:
-    pct = max(0.0, min(100.0, float(percent)))
-    filled = min(length, int(round(length * pct / 100)))
-    return "█" * filled + "░" * (length - filled)
-
-
-def _gauge_line(percent: float) -> str:
-    """🟡 <code>██████████░░░░░░ 65.7%</code>"""
-    return f"{zone_dot(percent)} <code>{format_progress_bar(percent)}</code>"
-
-
 def delta_chip(pct, lang: str = "ru") -> str:
     """Spending momentum chip. NOTE inversion: lower spend is GOOD (green)."""
     if pct is None:
@@ -195,10 +176,10 @@ def render_sparkline(buckets: list) -> str:
 
 # ───────────────────────── Budget / cards ─────────────────────────
 
-def format_budget_status(status: dict, lang: str, pace: str | None = None, currency: str = DEFAULT_CURRENCY) -> str:
+def format_budget_status(status: dict, lang: str, currency: str = DEFAULT_CURRENCY) -> str:
     head = "💰 <b>Бюджет</b>" if lang == "ru" else "💰 <b>Budget</b>"
     line2 = f"{_f(status['spent'], currency)} / {_f(status['budget'], currency)}"
-    lines = [head, _gauge_line(status["percent"]), line2]
+    lines = [head, f"{zone_dot(status['percent'])} {status['percent']:.1f}%", line2]
 
     if status["warning"]:
         if status["percent"] >= 100:
@@ -214,14 +195,12 @@ def format_budget_status(status: dict, lang: str, pace: str | None = None, curre
         )
         lines.append(msg)
 
-    if pace:
-        lines.append(f"<i>{pace}</i>")
     return "\n".join(lines)
 
 
 def format_saved_card(
     result: dict, status: dict, lang: str, input_type: str = "text",
-    pace: str | None = None, currency: str = DEFAULT_CURRENCY, fx_note: str | None = None,
+    currency: str = DEFAULT_CURRENCY, fx_note: str | None = None,
 ) -> str:
     cat = result.get("category", "Другое")
     emoji = CATEGORY_EMOJI.get(cat, "📦")
@@ -258,7 +237,7 @@ def format_saved_card(
 
     lines.append("")
     lines.append(DIVIDER)
-    lines.append(format_budget_status(status, lang, pace=pace, currency=currency))
+    lines.append(format_budget_status(status, lang, currency=currency))
     return "\n".join(lines)
 
 
@@ -279,7 +258,6 @@ def format_monthly_report(summary: list, status: dict, lang: str, month_label: s
         n = int(row.get("num_transactions", 0))
         lines.append(f"{emoji} <b>{escape(cat)}</b>")
         lines.append(f"   {_f(amt, currency)} · {share:.0f}% · {_count_label(n, lang)}")
-        lines.append(f"   <code>{_bar(share, 15)}</code>")
         lines.append("")
 
     lines.append(DIVIDER)
@@ -400,12 +378,12 @@ def format_analytics_card(a: dict, lang: str, month_label: str | None = None, cu
         lines.append(DIVIDER)
         of = "из" if lang == "ru" else "of"
         lines.append(f"💸 <b>{_f(0, currency)}</b>  <i>{of} {_f(a['budget'], currency)}</i>")
-        lines.append(_gauge_line(0))
+        lines.append(f"{zone_dot(0)} 0.0%")
         return "\n".join(lines)
 
     of = "из" if lang == "ru" else "of"
     lines.append(f"💸 <b>{_f(a['spent'], currency)}</b>  <i>{of} {_f(a['budget'], currency)}</i>")
-    lines.append(_gauge_line(a["percent"]))
+    lines.append(f"{zone_dot(a['percent'])} {a['percent']:.1f}%")
 
     # MoM chip
     if a["mom_delta_pct"] is not None:
@@ -413,43 +391,6 @@ def format_analytics_card(a: dict, lang: str, month_label: str | None = None, cu
         prev_lbl = _prev_month_short(a["year"], a["month"], lang)
         was = "было" if lang == "ru" else "was"
         lines.append(f"🔁 vs {prev_lbl}: {chip}  <i>({was} {_f(a['prev_total'], currency)})</i>")
-
-    # Forecast (current month only)
-    if a["is_current"]:
-        lines.append("")
-        fc_head = "🔮 <b>Прогноз к концу месяца</b>" if lang == "ru" else "🔮 <b>Month-end forecast</b>"
-        lines.append(fc_head)
-        if a["proj_delta"] <= 0:
-            verdict = (
-                f"✅ уложишься (−{_f(abs(a['proj_delta']), currency)})"
-                if lang == "ru"
-                else f"✅ on track (−{_f(abs(a['proj_delta']), currency)})"
-            )
-        else:
-            verdict = (
-                f"⚠️ перерасход (+{_f(a['proj_delta'], currency)})"
-                if lang == "ru"
-                else f"⚠️ overspend (+{_f(a['proj_delta'], currency)})"
-            )
-        budget_word = "бюджета" if lang == "ru" else "of budget"
-        lines.append(
-            f"<blockquote>≈ {_f(a['projection'], currency)} · {a['proj_pct']:.0f}% {budget_word}\n{verdict}</blockquote>"
-        )
-
-        # Pace
-        lines.append("")
-        if lang == "ru":
-            lines.append(f"🔥 Темп: <b>{_f(a['burn'], currency)}/день</b>")
-            if a["days_left"] > 0:
-                lines.append(
-                    f"🛟 Норма: <b>≤ {_f(a['safe_daily'], currency)}/день</b>  <i>(осталось {a['days_left']} дн.)</i>"
-                )
-        else:
-            lines.append(f"🔥 Pace: <b>{_f(a['burn'], currency)}/day</b>")
-            if a["days_left"] > 0:
-                lines.append(
-                    f"🛟 Safe: <b>≤ {_f(a['safe_daily'], currency)}/day</b>  <i>({a['days_left']} days left)</i>"
-                )
 
     # Sparkline
     if a.get("sparkline") and max(a["sparkline"]) > 0:
@@ -474,7 +415,7 @@ def format_analytics_card(a: dict, lang: str, month_label: str | None = None, cu
     for c in a["top3"]:
         emoji = CATEGORY_EMOJI.get(c["category"], "📦")
         lines.append(
-            f"{emoji} <b>{escape(c['category'])}</b>  <code>{_bar(c['share'], 10)}</code> {c['share']:.0f}%"
+            f"{emoji} <b>{escape(c['category'])}</b>  ·  {c['share']:.0f}%"
         )
         lines.append(f"   {_f(c['amount'], currency)} · {_count_label(c['n'], lang)}")
 
@@ -487,23 +428,6 @@ def format_analytics_card(a: dict, lang: str, month_label: str | None = None, cu
         lines.append(f"🧾 {_count_label(a['n_total'], lang)} · avg {_f(a['avg_ticket'], currency)}")
 
     return "\n".join(lines)
-
-
-def build_saved_pace(budget: float, spent_after: float, now: datetime, lang: str, currency: str = DEFAULT_CURRENCY) -> str:
-    """Short italic pace line for the saved-card footer (no DB)."""
-    days_in_month = calendar.monthrange(now.year, now.month)[1]
-    day = max(1, now.day)
-    days_left = max(0, days_in_month - day)
-    burn = spent_after / day
-    remaining = max(0.0, float(budget) - spent_after)
-    safe = (remaining / days_left) if days_left > 0 else 0.0
-    if lang == "ru":
-        if days_left > 0:
-            return f"🔥 темп {_f(burn, currency)}/день · 🛟 норма ≤ {_f(safe, currency)}/день"
-        return f"🔥 темп {_f(burn, currency)}/день"
-    if days_left > 0:
-        return f"🔥 pace {_f(burn, currency)}/day · 🛟 safe ≤ {_f(safe, currency)}/day"
-    return f"🔥 pace {_f(burn, currency)}/day"
 
 
 # ───────────────────────── Savings goals ─────────────────────────
@@ -555,7 +479,7 @@ def format_goal_card(goal: dict, lang: str, today: date | None = None) -> str:
         done_msg = "🏆 <b>Цель достигнута!</b>" if lang == "ru" else "🏆 <b>Goal reached!</b>"
         lines.append(done_msg)
         lines.append("")
-    lines.append(f"{goal_dot(pct)} <code>{format_progress_bar(min(pct, 100))}</code>")
+    lines.append(f"{goal_dot(pct)} <b>{min(pct, 100):.0f}%</b>")
     lines.append(f"<b>{_f(p['saved'], cur)}</b> / {_f(p['target'], cur)}")
 
     if not p["done"]:
@@ -569,11 +493,12 @@ def format_goal_card(goal: dict, lang: str, today: date | None = None) -> str:
             dl_str = _short_date(dl, lang)
         except (ValueError, TypeError):
             dl_str = str(p["deadline"])
-        lines.append("")
         if p["overdue"] and not p["done"]:
+            lines.append("")
             msg = f"📅 Срок ({dl_str}) прошёл" if lang == "ru" else f"📅 Deadline ({dl_str}) passed"
             lines.append(msg)
         elif p["days_left"] is not None:
+            lines.append("")
             until = "до" if lang == "ru" else "by"
             dleft = _days_label(p["days_left"], lang)
             tail = f"осталось {dleft}" if lang == "ru" else f"{dleft} left"
@@ -605,7 +530,6 @@ def format_goals_list(goals: list, lang: str, today: date | None = None) -> str:
         title = escape(str(g.get("title", "")))
         badge = "🏆" if p["done"] else f"{p['percent']:.0f}%"
         lines.append(f"{emoji} <b>{title}</b>  ·  {badge}")
-        lines.append(f"<code>{_bar(min(p['percent'], 100), 16)}</code>")
         sub = f"{_f(p['saved'], cur)} / {_f(p['target'], cur)}"
         if not p["done"] and p["days_left"] is not None and p["days_left"] >= 0:
             sub += f" · {_days_label(p['days_left'], lang)}" if lang == "en" else f" · ещё {_days_label(p['days_left'], lang)}"
@@ -635,7 +559,7 @@ def format_budget_alert(status: dict, lang: str, currency: str = DEFAULT_CURRENC
         else:
             body = f"Spent {_f(status['spent'], currency)} of {_f(status['budget'], currency)} ({pct:.0f}%)."
             tail = f"{_f(status['remaining'], currency)} left. Watch the pace 👀"
-    return f"{head}\n{_gauge_line(pct)}\n{body}\n\n{tail}"
+    return f"{head}\n{zone_dot(pct)} {pct:.1f}%\n{body}\n\n{tail}"
 
 
 def format_large_tx_alert(amount: float, category: str, avg: float, lang: str, currency: str = DEFAULT_CURRENCY) -> str:
@@ -704,6 +628,109 @@ def format_weekly_summary(total: float, n: int, top3: list, prev_total: float | 
     return "\n".join(lines)
 
 
+def _debt_due(due, today: date | None):
+    """Return (days_left, overdue) for a debt due date, or (None, False)."""
+    if not due:
+        return None, False
+    try:
+        dl = date.fromisoformat(str(due)[:10])
+    except (ValueError, TypeError):
+        return None, False
+    ref = today or date.today()
+    days = (dl - ref).days
+    return days, days < 0
+
+
+def _debt_due_str(due, lang: str, today: date | None) -> str:
+    """' · до 5 июл · ещё 3 дня' / ' · просрочен на 2 дня' / ''."""
+    days, overdue = _debt_due(due, today)
+    if days is None:
+        return ""
+    try:
+        dl = date.fromisoformat(str(due)[:10])
+        ds = _short_date(dl, lang)
+    except (ValueError, TypeError):
+        ds = str(due)
+    if overdue:
+        n = _days_label(abs(days), lang)
+        return f" · ⏰ просрочен на {n}" if lang == "ru" else f" · ⏰ {n} overdue"
+    until = "до" if lang == "ru" else "by"
+    if days == 0:
+        tail = "сегодня" if lang == "ru" else "today"
+        return f" · {until} {ds} · {tail}"
+    n = _days_label(days, lang)
+    tail = f"ещё {n}" if lang == "ru" else f"{n} left"
+    return f" · {until} {ds} · {tail}"
+
+
+def format_debts_list(debts: list, lang: str, today: date | None = None) -> str:
+    """Full debts overview for the bot: 'мне должны' and 'я должен', open only."""
+    head = "🤝 <b>Долги</b>" if lang == "ru" else "🤝 <b>Debts</b>"
+    open_debts = [d for d in debts if d.get("status") == "open"]
+    if not open_debts:
+        empty = ("📭 Открытых долгов нет.\nДобавь в приложении — напомню о сроке."
+                 if lang == "ru" else
+                 "📭 No open debts.\nAdd one in the app — I'll remind you before it's due.")
+        return f"{head}\n{DIVIDER}\n\n{empty}"
+
+    mine = [d for d in open_debts if d.get("direction") == "owed_to_me"]
+    theirs = [d for d in open_debts if d.get("direction") == "i_owe"]
+
+    def _line(d):
+        cur = d.get("currency") or DEFAULT_CURRENCY
+        who = escape(str(d.get("counterparty", "—")))
+        return f"• <b>{who}</b> — {_f(d.get('amount', 0), cur)}{_debt_due_str(d.get('due_date'), lang, today)}"
+
+    lines = [head, DIVIDER]
+    if mine:
+        total = {}
+        for d in mine:
+            cur = d.get("currency") or DEFAULT_CURRENCY
+            total[cur] = total.get(cur, 0) + float(d.get("amount", 0) or 0)
+        sub = " · ".join(_f(v, c) for c, v in total.items())
+        lines.append("")
+        lines.append(f"📥 <b>Мне должны</b> · {sub}" if lang == "ru" else f"📥 <b>Owed to me</b> · {sub}")
+        lines += [_line(d) for d in mine]
+    if theirs:
+        total = {}
+        for d in theirs:
+            cur = d.get("currency") or DEFAULT_CURRENCY
+            total[cur] = total.get(cur, 0) + float(d.get("amount", 0) or 0)
+        sub = " · ".join(_f(v, c) for c, v in total.items())
+        lines.append("")
+        lines.append(f"📤 <b>Я должен</b> · {sub}" if lang == "ru" else f"📤 <b>I owe</b> · {sub}")
+        lines += [_line(d) for d in theirs]
+    return "\n".join(lines)
+
+
+def format_debt_reminder(debts: list, lang: str, today: date | None = None) -> str:
+    """Concise nudge about debts due within 3 days or overdue. '' if none."""
+    ref = today or date.today()
+    soon = []
+    for d in debts:
+        if d.get("status") != "open":
+            continue
+        days, overdue = _debt_due(d.get("due_date"), ref)
+        if days is None:
+            continue
+        if overdue or days <= 3:
+            soon.append((days, d))
+    if not soon:
+        return ""
+    soon.sort(key=lambda x: x[0])
+    head = "🤝 <b>Напоминание о долгах</b>" if lang == "ru" else "🤝 <b>Debt reminder</b>"
+    lines = [head, DIVIDER, ""]
+    for _days, d in soon:
+        cur = d.get("currency") or DEFAULT_CURRENCY
+        who = escape(str(d.get("counterparty", "—")))
+        if d.get("direction") == "owed_to_me":
+            verb = f"{who} должен тебе" if lang == "ru" else f"{who} owes you"
+        else:
+            verb = f"Ты должен {who}" if lang == "ru" else f"You owe {who}"
+        lines.append(f"• {verb} <b>{_f(d.get('amount', 0), cur)}</b>{_debt_due_str(d.get('due_date'), lang, ref)}")
+    return "\n".join(lines)
+
+
 def format_goal_pulse(goals: list, lang: str, part: str = "morning", today: date | None = None) -> str:
     """Twice-daily (morning/evening) digest of all active goals with progress + pace.
     Returns '' if there are no active goals (caller should skip sending)."""
@@ -723,7 +750,6 @@ def format_goal_pulse(goals: list, lang: str, part: str = "morning", today: date
         emoji = g.get("emoji") or "🎯"
         title = escape(str(g.get("title", "")))
         lines.append(f"{emoji} <b>{title}</b>  ·  {p['percent']:.0f}%")
-        lines.append(f"<code>{_bar(min(p['percent'], 100), 16)}</code>")
         sub2 = f"{_f(p['saved'], cur)} / {_f(p['target'], cur)}"
         if p["days_left"] is not None and p["days_left"] >= 0:
             dleft = _days_label(p["days_left"], lang)
