@@ -50,7 +50,8 @@ body{
 /* Donut */
 .donut-wrap{display:flex;gap:14px;align-items:center}
 .donut{position:relative;width:150px;height:150px;flex:0 0 auto}
-.donut svg{width:150px;height:150px;display:block}
+.donut::before{content:"";position:absolute;inset:18px;border-radius:50%;background:radial-gradient(circle,rgba(108,123,255,.14),transparent 70%);pointer-events:none}
+.donut svg{width:150px;height:150px;display:block;position:relative}
 .donut-center{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;text-align:center}
 .donut-center .lbl{font-size:10px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted)}
 .donut-center .big{font-size:21px;font-weight:800;margin-top:2px}
@@ -71,12 +72,7 @@ body{
 .gauge .read i{font-size:12px;font-style:normal;color:var(--muted)}
 .gmeta{flex:1;font-size:12.5px}
 .gmeta .l{display:flex;justify-content:space-between;margin-bottom:4px}
-.gmeta .pace{color:var(--faint);font-size:11px;margin-top:6px;line-height:1.45}
 .pill{font-size:11px;font-weight:700;padding:3px 9px;border-radius:999px}
-
-/* Insight */
-.insight{background:linear-gradient(135deg,rgba(108,123,255,.16),rgba(67,224,216,.06));border:1px solid var(--border);border-radius:14px;padding:13px 14px;font-size:13px;display:flex;gap:9px;align-items:flex-start}
-.insight .ic{font-size:16px}
 
 /* Transactions */
 .daygrp{margin-bottom:14px}
@@ -109,7 +105,6 @@ body{
 .bar .track{flex:1;height:9px;border-radius:6px;background:var(--surface-3);overflow:hidden}
 .bar .fill{height:100%;border-radius:6px;transition:width .7s cubic-bezier(.22,1,.36,1)}
 .bar .pc{width:38px;text-align:right;font-weight:700}
-.stack{display:flex;height:11px;border-radius:6px;overflow:hidden;gap:2px;margin-bottom:16px}
 .kpis{display:flex;gap:10px}
 .kpi{flex:1;background:var(--surface-2);border:1px solid var(--hair);border-radius:13px;padding:11px 10px;text-align:center}
 .kpi .v{font-size:15px;font-weight:800}
@@ -191,6 +186,20 @@ body{
 .newgoal{width:100%;padding:14px;border-radius:14px;background:var(--surface);border:1px dashed var(--border);color:var(--accent);font-size:13.5px;font-weight:700;cursor:pointer;margin-bottom:12px}
 .goalcap{font-size:12.5px;font-weight:700;padding:5px 12px;border-radius:999px;cursor:pointer}
 
+/* debts */
+.dsum{display:flex;gap:10px;margin-bottom:6px}
+.dsum .box{flex:1;background:var(--surface-2);border:1px solid var(--hair);border-radius:13px;padding:12px 10px;text-align:center}
+.dsum .box .v{font-size:16px;font-weight:800}
+.dsum .box .k{font-size:10px;color:var(--muted);margin-top:3px}
+.dgrouphdr{font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--muted);margin:16px 2px 10px}
+.debt{background:var(--surface);border:1px solid var(--hair);border-radius:14px;padding:13px 14px;margin-bottom:10px}
+.debt .dtitle{font-weight:700;font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.debt .dsub{font-size:11.5px;color:var(--muted);margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.debt .damt{font-weight:800;font-size:15px;flex:0 0 auto;margin-left:10px}
+.dactions{display:flex;gap:8px;margin-top:11px}
+.dbtn{flex:1;padding:8px 10px;border-radius:10px;background:var(--surface-2);border:1px solid var(--hair);color:var(--text);font-size:12.5px;font-weight:600;cursor:pointer;text-align:center}
+.dbtn.dz{flex:0 0 auto;width:44px;color:var(--dang)}
+
 /* currency grid + toggles (profile) */
 .curgrid{display:flex;flex-wrap:wrap;gap:8px}
 .curchip{flex:1 1 28%;min-width:0;padding:11px 6px;border-radius:12px;background:var(--surface-2);border:1px solid var(--hair);font-size:13px;font-weight:600;cursor:pointer;text-align:center;display:flex;flex-direction:column;gap:3px;align-items:center}
@@ -244,6 +253,15 @@ body{
       <span class="goalcap" id="goalsTotal" style="background:rgba(108,123,255,.16);color:var(--accent)"></span>
     </div>
     <div id="goalsBody"></div>
+  </section>
+
+  <!-- DEBTS -->
+  <section class="screen" id="s-debts">
+    <div class="row sp" style="margin:2px 2px 14px">
+      <div class="h1">🤝 Долги</div>
+      <span class="goalcap" id="debtsCap" style="background:rgba(108,123,255,.16);color:var(--accent)"></span>
+    </div>
+    <div id="debtsBody"></div>
   </section>
 
   <!-- PROFILE -->
@@ -303,6 +321,24 @@ body{
     <div class="amount"><input id="cAmt" inputmode="numeric" placeholder="0"><div class="cur" id="cCurLbl">сум</div></div>
     <div class="chiprail" id="contribPresets" style="justify-content:center;flex-wrap:wrap;padding-bottom:4px"></div>
     <button class="submit" id="cSubmit" disabled>Отложить</button>
+  </div>
+</div>
+
+<!-- DEBT CREATE SHEET -->
+<div class="sheetwrap" id="debtSheet">
+  <div class="sheet-scrim" id="debtScrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <h3>Новый долг</h3>
+    <div class="seg" id="dDir" style="margin-bottom:14px">
+      <button data-d="owed_to_me" class="on">📥 Мне должны</button>
+      <button data-d="i_owe">📤 Я должен</button>
+    </div>
+    <div class="field"><input id="dWho" placeholder="👤 Кто — напр. «Али»" maxlength="80"></div>
+    <div class="amount"><input id="dAmt" inputmode="numeric" placeholder="0"><div class="cur" id="dCurLbl">сум</div></div>
+    <div class="field"><input id="dDue" type="date"></div>
+    <div class="field"><input id="dNote" placeholder="Заметка (необязательно)"></div>
+    <button class="submit" id="dSubmit" disabled>Добавить</button>
   </div>
 </div>
 
@@ -441,14 +477,7 @@ function renderOverview(d){
   const top=cats.slice(0,5), rest=cats.slice(5);
   let legend=top.map((c,i)=>`<div class="lg" data-i="${i}"><span class="sw" style="background:${CAT_COLOR[c.category]}"></span><span class="nm">${c.emoji} ${esc(c.category)}</span><span class="pc num">${Math.round(c.share)}%</span></div>`).join("");
   if(rest.length){const rs=rest.reduce((a,c)=>a+c.share,0);legend+=`<div class="lg muted"><span class="sw" style="background:#3a3f5c"></span><span class="nm">+${rest.length} ещё</span><span class="pc num">${Math.round(rs)}%</span></div>`;}
-  const a=d.analytics||{};
   const remTxt=d.warning?`<span class="dang">Превышено ${num(Math.max(0,d.spent-d.budget))}</span>`:`<span class="pos">Остаётся ${num(d.remaining)}</span>`;
-  const pace=a.days_left>0?`🔥 темп ${num(a.burn)}/д · 🛟 норма ≤ ${num(a.safe_daily)}/д`:`🔥 темп ${num(a.burn)}/д`;
-  let insight="";
-  if(d.is_current && a.projection!=null){
-    const over=a.proj_delta>0;
-    insight=`<div class="insight"><span class="ic">🔮</span><div>Прогноз к концу месяца <b>≈ ${moneyShort(a.projection)}</b> · ${Math.round(a.proj_pct)}% бюджета<br><span class="${over?'warn':'pos'}">${over?'⚠️ перерасход +'+num(a.proj_delta):'✅ уложишься, запас '+num(-a.proj_delta)}</span></div></div>`;
-  }
   body.innerHTML=`
     <div class="card"><div class="eyebrow">Расходы по категориям</div>
       <div class="donut-wrap">
@@ -459,10 +488,9 @@ function renderOverview(d){
     <div class="card"><div class="row sp" style="margin-bottom:12px"><div class="eyebrow" style="margin:0">Бюджет</div><span class="pill" style="background:${zoneColor(d.percent)}22;color:${zoneColor(d.percent)}">${Math.round(d.percent)}%</span></div>
       <div class="gauge-wrap">
         <div class="gauge" id="gaugeBox">${gaugeSVG(d.percent)}<div class="read"><b class="num" style="color:${zoneColor(d.percent)}">${Math.round(d.percent)}</b><i>%</i></div></div>
-        <div class="gmeta"><div class="l"><span class="muted">Потрачено</span><b class="num">${num(d.spent)}</b></div><div class="l"><span class="muted">Бюджет</span><b class="num">${num(d.budget)}</b></div><div>${remTxt}</div><div class="pace">${pace}</div></div>
+        <div class="gmeta"><div class="l"><span class="muted">Потрачено</span><b class="num">${num(d.spent)}</b></div><div class="l"><span class="muted">Бюджет</span><b class="num">${num(d.budget)}</b></div><div>${remTxt}</div></div>
       </div>
     </div>
-    ${insight}
     <div id="ovGoals"></div>
     <div class="card"><div class="row sp" style="margin-bottom:10px"><div class="eyebrow" style="margin:0">Недавние</div><span class="muted" style="font-size:12px;cursor:pointer" id="seeAll">Все ›</span></div><div id="recent"></div></div>`;
   // donut interaction
@@ -549,18 +577,13 @@ async function deleteTx(id){
 function renderAnalytics(d){
   const body=document.getElementById("anBody");const a=d.analytics||{};const cats=d.categories||[];
   if(!cats.length){body.innerHTML=`<div class="empty"><span class="e">📊</span>Нет данных за этот месяц</div>`;return;}
-  let fc="";
-  if(d.is_current&&a.projection!=null){const over=a.proj_delta>0;
-    fc=`<div class="card"><div class="eyebrow">Прогноз к концу месяца</div><div style="font-size:26px;font-weight:800" class="num">≈ ${num(a.projection)}</div><div class="muted" style="font-size:12px;margin:3px 0 8px">${Math.round(a.proj_pct)}% бюджета</div><div class="${over?'warn':'pos'}" style="font-weight:700;font-size:13px">${over?'⚠️ перерасход +'+num(a.proj_delta):'✅ уложишься −'+num(-a.proj_delta)}</div></div>`;}
   let mom="";
   if(a.mom_delta_pct!=null){const p=a.mom_delta_pct;const cls=Math.abs(p)<=3?'muted':(p<0?'pos':'dang');const ar=Math.abs(p)<=3?'▪️ ровно':(p<0?'🟢 ↓'+Math.abs(Math.round(p))+'%':'🔴 ↑'+Math.abs(Math.round(p))+'%');mom=`<span class="pill ${cls}" style="background:var(--surface-2)">${ar}</span>`;}
   const trend=(a.trend30&&a.trend30.length)?a.trend30:(a.sparkline||[]);
-  const total=cats.reduce((s,c)=>s+c.total,0)||1;
-  const stack=cats.map(c=>`<div style="flex:${c.total};background:${CAT_COLOR[c.category]}"></div>`).join("");
   const bars=cats.map(c=>`<div class="bar"><div class="nm">${c.emoji} ${esc(c.category)}</div><div class="track"><div class="fill" style="width:${c.share}%;background:${CAT_COLOR[c.category]}"></div></div><div class="pc num">${Math.round(c.share)}%</div></div>`).join("");
-  body.innerHTML=`${fc}
+  body.innerHTML=`
     <div class="card"><div class="row sp" style="margin-bottom:12px"><div class="eyebrow" style="margin:0">Куда уходят деньги</div>${mom}</div>
-      <div class="stack">${stack}</div>${bars}</div>
+      ${bars}</div>
     <div class="card"><div class="eyebrow">Динамика · ${trend.length} дн</div>${trendSVG(trend)}</div>
     <div class="kpis"><div class="kpi"><div class="v num">${moneyShort(a.avg_ticket)}</div><div class="k">средний чек</div></div>
       <div class="kpi"><div class="v num">${a.n_total||0}</div><div class="k">операций</div></div>
@@ -583,6 +606,7 @@ function renderProfile(){
     <div class="card"><div class="eyebrow">Уведомления</div><div id="prNotify"></div></div>
     <div class="card"><div class="eyebrow">Язык</div><div class="seg" id="langSeg"><button data-v="ru" class="${LANG==='ru'?'on':''}">🇷🇺 RU</button><button data-v="en" class="${LANG==='en'?'on':''}">🇬🇧 EN</button></div></div>
     <button class="listbtn" id="goalsNav">🎯 Мои цели <span>›</span></button>
+    <button class="listbtn" id="debtsNav">🤝 Долги <span>›</span></button>
     <button class="listbtn" id="tipsBtn">💡 Советы по экономии <span>›</span></button>
     <button class="listbtn" id="csvBtn">⬇️ Экспорт CSV <span>›</span></button>
     <button class="listbtn dz" id="resetBtn">🗑 Сбросить все траты <span>›</span></button>
@@ -595,6 +619,7 @@ function renderProfile(){
   document.getElementById("curPick").onclick=()=>{const c=document.getElementById("curCard");c.style.display=c.style.display==="none"?"":"none";haptic("sel");};
   document.querySelectorAll("#langSeg button").forEach(b=>b.onclick=async()=>{LANG=b.dataset.v;haptic("sel");try{await api("/api/language",{method:"POST",body:{language:LANG}});}catch(e){}renderProfile();});
   document.getElementById("goalsNav").onclick=()=>switchTab("goals");
+  document.getElementById("debtsNav").onclick=()=>switchTab("debts");
   document.getElementById("tipsBtn").onclick=async()=>{const box=document.getElementById("tipsBox");box.innerHTML=`<div class="card sk" style="height:80px"></div>`;try{const r=await api("/api/tips");box.innerHTML=r.tips?`<div class="card" style="white-space:pre-wrap;font-size:13px;line-height:1.5">${esc(r.tips)}</div>`:`<div class="empty">Нет данных для советов</div>`;}catch(e){box.innerHTML=`<div class="empty">Ошибка</div>`;}};
   document.getElementById("csvBtn").onclick=exportCSV;
   document.getElementById("resetBtn").onclick=async()=>{if(!confirm("Удалить ВСЕ траты? Это необратимо."))return;try{await api("/api/reset",{method:"POST"});haptic("notif","warning");TXS=[];loadOverview();toast("Все траты удалены");switchTab("overview");}catch(e){toast("Ошибка");}};
@@ -681,6 +706,7 @@ function switchTab(name){
   if(name==="analytics")loadAnalytics();
   if(name==="profile")renderProfile();
   if(name==="goals")loadGoals();
+  if(name==="debts")loadDebts();
   if(name==="transactions"&&!TXS.length)loadTx();
   window.scrollTo(0,0);
 }
@@ -820,7 +846,8 @@ const NOTIFY_META=[
   ["large_tx","Крупные траты","Если покупка заметно больше обычной"],
   ["weekly_summary","Итоги недели","Сводка каждое воскресенье"],
   ["daily_digest","Итоги дня","Короткий обзор вечером"],
-  ["goal_reminders","Напоминания о целях","Когда близок срок цели"]
+  ["goal_reminders","Напоминания о целях","Когда близок срок цели"],
+  ["debt_reminders","Напоминания о долгах","Когда близок срок возврата"]
 ];
 function renderNotify(){
   const box=document.getElementById("prNotify");if(!box||!ME)return;
@@ -906,6 +933,92 @@ async function deleteGoal(id){
   document.getElementById("cAmt").addEventListener("input",updateCSubmit);
   fmtAmt("cAmt",()=>CONTRIB_CUR);
   if(INIT){loadMe().then(()=>{loadGoals();});}
+})();
+</script>
+
+<script>
+"use strict";
+/* ═══════════════ Debts / loans ═══════════════ */
+let DEBTS=[], DEBT_DIR="owed_to_me", DEBT_SUMMARY=null;
+
+function debtDueLabel(d){
+  if(d.days_left==null)return "";
+  if(d.overdue)return `<span class="dang">⏰ просрочен на ${Math.abs(d.days_left)} ${plural(Math.abs(d.days_left),["день","дня","дней"])}</span>`;
+  if(d.days_left===0)return `<span class="warn">📅 сегодня</span>`;
+  return `<span class="muted">📅 ещё ${d.days_left} ${plural(d.days_left,["день","дня","дней"])}</span>`;
+}
+function debtRow(d){
+  const mine=d.direction==="owed_to_me";
+  const due=d.due_date?debtDueLabel(d):"";
+  const note=d.note?((due?" · ":"")+esc(d.note)):"";
+  return `<div class="debt" data-id="${d.id}">
+    <div class="row sp">
+      <div style="min-width:0;flex:1"><div class="dtitle">${esc(d.counterparty)}</div><div class="dsub">${due||note?due+note:"<span class=\"faint\">без срока</span>"}</div></div>
+      <div class="damt ${mine?'pos':'dang'} num">${mine?'+':'−'}${money(d.amount,d.currency)}</div>
+    </div>
+    <div class="dactions">
+      <button class="dbtn" data-act="settle">✓ Погашено</button>
+      <button class="dbtn dz" data-act="del">🗑</button>
+    </div>
+  </div>`;
+}
+function renderDebts(){
+  const body=document.getElementById("debtsBody");if(!body)return;
+  const open=DEBTS.filter(d=>d.status==="open");
+  const cap=document.getElementById("debtsCap");if(cap)cap.textContent=open.length?open.length+" "+plural(open.length,["долг","долга","долгов"]):"";
+  let html=`<button class="newgoal" id="newDebt">＋ Новый долг</button>`;
+  if(!open.length){body.innerHTML=html+`<div class="empty"><span class="e">🤝</span>Долгов нет.<br>Добавь — напомню о сроке возврата.</div>`;document.getElementById("newDebt").onclick=openDebtSheet;return;}
+  const mine=open.filter(d=>d.direction==="owed_to_me"), theirs=open.filter(d=>d.direction==="i_owe");
+  // Use the API's base-currency-converted totals (correct for mixed currencies);
+  // fall back to a raw sum only if the summary is unavailable.
+  const sumMine=DEBT_SUMMARY?DEBT_SUMMARY.owed_to_me:mine.reduce((a,d)=>a+d.amount,0);
+  const sumTheirs=DEBT_SUMMARY?DEBT_SUMMARY.i_owe:theirs.reduce((a,d)=>a+d.amount,0);
+  html+=`<div class="dsum"><div class="box"><div class="v pos num">${moneyShort(sumMine)}</div><div class="k">мне должны</div></div><div class="box"><div class="v dang num">${moneyShort(sumTheirs)}</div><div class="k">я должен</div></div></div>`;
+  if(mine.length)html+=`<div class="dgrouphdr">📥 Мне должны</div>`+mine.map(debtRow).join("");
+  if(theirs.length)html+=`<div class="dgrouphdr">📤 Я должен</div>`+theirs.map(debtRow).join("");
+  body.innerHTML=html;
+  document.getElementById("newDebt").onclick=openDebtSheet;
+  body.querySelectorAll(".debt").forEach(card=>{const id=+card.dataset.id;card.querySelectorAll("[data-act]").forEach(b=>b.onclick=()=>debtAction(id,b.dataset.act));});
+}
+function debtAction(id,act){if(act==="settle")settleDebt(id);else if(act==="del")deleteDebt(id);}
+async function loadDebts(){if(!INIT)return;try{const r=await api("/api/debts");DEBTS=r.debts||[];DEBT_SUMMARY=r.summary||null;}catch(e){DEBTS=[];DEBT_SUMMARY=null;}renderDebts();}
+
+function openDebtSheet(){
+  DEBT_DIR="owed_to_me";
+  document.getElementById("debtSheet").classList.add("open");
+  document.getElementById("dCurLbl").textContent=curMeta(CURCODE).symbol;
+  ["dWho","dAmt","dDue","dNote"].forEach(id=>document.getElementById(id).value="");
+  document.querySelectorAll("#dDir button").forEach(b=>b.classList.toggle("on",b.dataset.d===DEBT_DIR));
+  updateDSubmit();haptic("impact","light");
+  setTimeout(()=>document.getElementById("dWho").focus(),300);
+}
+function closeDebtSheet(){document.getElementById("debtSheet").classList.remove("open");}
+function dAmtVal(){return parseFloat((document.getElementById("dAmt").value||"").replace(/[^\d.]/g,""))||0;}
+function updateDSubmit(){document.getElementById("dSubmit").disabled=!(dAmtVal()>0&&document.getElementById("dWho").value.trim());}
+async function submitDebt(){
+  const who=document.getElementById("dWho").value.trim(),amount=dAmtVal();
+  if(!who||!amount)return;
+  const due=document.getElementById("dDue").value||null,note=document.getElementById("dNote").value.trim()||null;
+  const btn=document.getElementById("dSubmit");btn.disabled=true;
+  try{await api("/api/debts",{method:"POST",body:{direction:DEBT_DIR,counterparty:who,amount,currency:CURCODE,due_date:due,note}});haptic("notif","success");closeDebtSheet();toast("Долг добавлен 🤝");await loadDebts();}
+  catch(e){toast("Ошибка: "+e.message);}finally{btn.disabled=false;}
+}
+async function settleDebt(id){
+  if(!DEBTS.find(x=>x.id===id))return;
+  try{await api("/api/debts/"+id+"/settle",{method:"POST"});haptic("notif","success");toast("Долг закрыт ✓");await loadDebts();}
+  catch(e){toast("Ошибка");}
+}
+async function deleteDebt(id){
+  if(!confirm("Удалить эту запись?"))return;
+  try{await api("/api/debts/"+id,{method:"DELETE"});haptic("impact","medium");toast("Удалено");await loadDebts();}
+  catch(e){toast("Ошибка");}
+}
+(function initDebts(){
+  document.getElementById("debtScrim").onclick=closeDebtSheet;
+  document.getElementById("dSubmit").onclick=submitDebt;
+  document.getElementById("dWho").addEventListener("input",updateDSubmit);
+  document.getElementById("dAmt").addEventListener("input",e=>{const v=e.target.value.replace(/[^\d]/g,"");e.target.value=v?fmtNum(+v,0,curMeta(CURCODE).grp):"";updateDSubmit();});
+  document.querySelectorAll("#dDir button").forEach(b=>b.onclick=()=>{DEBT_DIR=b.dataset.d;document.querySelectorAll("#dDir button").forEach(x=>x.classList.toggle("on",x===b));haptic("sel");});
 })();
 </script>
 </body>
