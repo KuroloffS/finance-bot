@@ -199,6 +199,8 @@ body{
 .dactions{display:flex;gap:8px;margin-top:11px}
 .dbtn{flex:1;padding:8px 10px;border-radius:10px;background:var(--surface-2);border:1px solid var(--hair);color:var(--text);font-size:12.5px;font-weight:600;cursor:pointer;text-align:center}
 .dbtn.dz{flex:0 0 auto;width:44px;color:var(--dang)}
+.debt.done{opacity:.5}
+.histbar{width:100%;display:flex;justify-content:space-between;align-items:center;background:none;border:none;color:var(--muted);font-size:12.5px;font-weight:600;cursor:pointer;padding:16px 2px 10px}
 
 /* currency grid + toggles (profile) */
 .curgrid{display:flex;flex-wrap:wrap;gap:8px}
@@ -339,6 +341,18 @@ body{
     <div class="field"><input id="dDue" type="date"></div>
     <div class="field"><input id="dNote" placeholder="Заметка (необязательно)"></div>
     <button class="submit" id="dSubmit" disabled>Добавить</button>
+  </div>
+</div>
+
+<!-- DEBT PAY SHEET (partial repayment) -->
+<div class="sheetwrap" id="payDebtSheet">
+  <div class="sheet-scrim" id="payDebtScrim"></div>
+  <div class="sheet">
+    <div class="grab"></div>
+    <h3 id="pdTitle">Погасить</h3>
+    <div class="amount"><input id="pdAmt" inputmode="numeric" placeholder="0"><div class="cur" id="pdCurLbl">сум</div></div>
+    <div class="chiprail" id="pdPresets" style="justify-content:center;flex-wrap:wrap;padding-bottom:4px"></div>
+    <button class="submit" id="pdSubmit" disabled>Погасить</button>
   </div>
 </div>
 
@@ -939,7 +953,7 @@ async function deleteGoal(id){
 <script>
 "use strict";
 /* ═══════════════ Debts / loans ═══════════════ */
-let DEBTS=[], DEBT_DIR="owed_to_me", DEBT_SUMMARY=null;
+let DEBTS=[], DEBT_DIR="owed_to_me", DEBT_SUMMARY=null, PAY_ID=null, PAY_CUR="UZS", HIST_OPEN=false;
 
 function debtDueLabel(d){
   if(d.days_left==null)return "";
@@ -947,42 +961,64 @@ function debtDueLabel(d){
   if(d.days_left===0)return `<span class="warn">📅 сегодня</span>`;
   return `<span class="muted">📅 ещё ${d.days_left} ${plural(d.days_left,["день","дня","дней"])}</span>`;
 }
-function debtRow(d){
-  const mine=d.direction==="owed_to_me";
+function debtSub(d){
   const due=d.due_date?debtDueLabel(d):"";
   const note=d.note?((due?" · ":"")+esc(d.note)):"";
+  const paid=(d.paid_amount||0)>0?`<span class="muted">осталось ${money(d.remaining,d.currency)} из ${money(d.amount,d.currency)}</span>`:"";
+  const parts=[paid,due+note].filter(Boolean);
+  return parts.length?parts.join("<br>"):`<span class="faint">без срока</span>`;
+}
+function debtRow(d){
+  const mine=d.direction==="owed_to_me";
+  const shown=(d.paid_amount||0)>0?d.remaining:d.amount;
   return `<div class="debt" data-id="${d.id}">
     <div class="row sp">
-      <div style="min-width:0;flex:1"><div class="dtitle">${esc(d.counterparty)}</div><div class="dsub">${due||note?due+note:"<span class=\"faint\">без срока</span>"}</div></div>
-      <div class="damt ${mine?'pos':'dang'} num">${mine?'+':'−'}${money(d.amount,d.currency)}</div>
+      <div style="min-width:0;flex:1"><div class="dtitle">${esc(d.counterparty)}</div><div class="dsub">${debtSub(d)}</div></div>
+      <div class="damt ${mine?'pos':'dang'} num">${mine?'+':'−'}${money(shown,d.currency)}</div>
     </div>
     <div class="dactions">
-      <button class="dbtn" data-act="settle">✓ Погашено</button>
+      <button class="dbtn" data-act="pay">💸 Погасить</button>
       <button class="dbtn dz" data-act="del">🗑</button>
     </div>
   </div>`;
 }
+function settledRow(d){
+  const mine=d.direction==="owed_to_me";
+  return `<div class="debt done" data-id="${d.id}"><div class="row sp">
+    <div style="min-width:0;flex:1"><div class="dtitle">✓ ${esc(d.counterparty)}</div><div class="dsub">${mine?'мне вернули':'я вернул'}</div></div>
+    <div class="row" style="gap:8px;flex:0 0 auto"><div class="damt muted num" style="margin:0">${money(d.amount,d.currency)}</div><button class="dbtn dz" data-act="del" style="width:38px;padding:8px 0">🗑</button></div>
+  </div></div>`;
+}
 function renderDebts(){
   const body=document.getElementById("debtsBody");if(!body)return;
-  const open=DEBTS.filter(d=>d.status==="open");
+  const open=DEBTS.filter(d=>d.status==="open"), done=DEBTS.filter(d=>d.status==="settled");
   const cap=document.getElementById("debtsCap");if(cap)cap.textContent=open.length?open.length+" "+plural(open.length,["долг","долга","долгов"]):"";
   let html=`<button class="newgoal" id="newDebt">＋ Новый долг</button>`;
-  if(!open.length){body.innerHTML=html+`<div class="empty"><span class="e">🤝</span>Долгов нет.<br>Добавь — напомню о сроке возврата.</div>`;document.getElementById("newDebt").onclick=openDebtSheet;return;}
-  const mine=open.filter(d=>d.direction==="owed_to_me"), theirs=open.filter(d=>d.direction==="i_owe");
-  // Use the API's base-currency-converted totals (correct for mixed currencies);
-  // fall back to a raw sum only if the summary is unavailable.
-  const sumMine=DEBT_SUMMARY?DEBT_SUMMARY.owed_to_me:mine.reduce((a,d)=>a+d.amount,0);
-  const sumTheirs=DEBT_SUMMARY?DEBT_SUMMARY.i_owe:theirs.reduce((a,d)=>a+d.amount,0);
-  html+=`<div class="dsum"><div class="box"><div class="v pos num">${moneyShort(sumMine)}</div><div class="k">мне должны</div></div><div class="box"><div class="v dang num">${moneyShort(sumTheirs)}</div><div class="k">я должен</div></div></div>`;
-  if(mine.length)html+=`<div class="dgrouphdr">📥 Мне должны</div>`+mine.map(debtRow).join("");
-  if(theirs.length)html+=`<div class="dgrouphdr">📤 Я должен</div>`+theirs.map(debtRow).join("");
+  if(!open.length && !done.length){body.innerHTML=html+`<div class="empty"><span class="e">🤝</span>Долгов нет.<br>Добавь — напомню о сроке возврата.</div>`;document.getElementById("newDebt").onclick=openDebtSheet;return;}
+  if(open.length){
+    const mine=open.filter(d=>d.direction==="owed_to_me"), theirs=open.filter(d=>d.direction==="i_owe");
+    // API summary is base-currency-converted over remaining amounts; fall back to a raw remainder sum.
+    const sumMine=DEBT_SUMMARY?DEBT_SUMMARY.owed_to_me:mine.reduce((a,d)=>a+(d.remaining!=null?d.remaining:d.amount),0);
+    const sumTheirs=DEBT_SUMMARY?DEBT_SUMMARY.i_owe:theirs.reduce((a,d)=>a+(d.remaining!=null?d.remaining:d.amount),0);
+    html+=`<div class="dsum"><div class="box"><div class="v pos num">${moneyShort(sumMine)}</div><div class="k">мне должны</div></div><div class="box"><div class="v dang num">${moneyShort(sumTheirs)}</div><div class="k">я должен</div></div></div>`;
+    if(mine.length)html+=`<div class="dgrouphdr">📥 Мне должны</div>`+mine.map(debtRow).join("");
+    if(theirs.length)html+=`<div class="dgrouphdr">📤 Я должен</div>`+theirs.map(debtRow).join("");
+  }else{
+    html+=`<div class="empty" style="padding:22px"><span class="e">🤝</span>Открытых долгов нет.</div>`;
+  }
+  if(done.length){
+    html+=`<button class="histbar" id="histToggle"><span>✓ Закрытые · ${done.length}</span><span>${HIST_OPEN?'▲':'▼'}</span></button>`;
+    if(HIST_OPEN)html+=done.map(settledRow).join("");
+  }
   body.innerHTML=html;
   document.getElementById("newDebt").onclick=openDebtSheet;
+  const ht=document.getElementById("histToggle");if(ht)ht.onclick=()=>{HIST_OPEN=!HIST_OPEN;haptic("sel");renderDebts();};
   body.querySelectorAll(".debt").forEach(card=>{const id=+card.dataset.id;card.querySelectorAll("[data-act]").forEach(b=>b.onclick=()=>debtAction(id,b.dataset.act));});
 }
-function debtAction(id,act){if(act==="settle")settleDebt(id);else if(act==="del")deleteDebt(id);}
+function debtAction(id,act){if(act==="pay")openPayDebt(id);else if(act==="del")deleteDebt(id);}
 async function loadDebts(){if(!INIT)return;try{const r=await api("/api/debts");DEBTS=r.debts||[];DEBT_SUMMARY=r.summary||null;}catch(e){DEBTS=[];DEBT_SUMMARY=null;}renderDebts();}
 
+/* create debt */
 function openDebtSheet(){
   DEBT_DIR="owed_to_me";
   document.getElementById("debtSheet").classList.add("open");
@@ -1003,10 +1039,29 @@ async function submitDebt(){
   try{await api("/api/debts",{method:"POST",body:{direction:DEBT_DIR,counterparty:who,amount,currency:CURCODE,due_date:due,note}});haptic("notif","success");closeDebtSheet();toast("Долг добавлен 🤝");await loadDebts();}
   catch(e){toast("Ошибка: "+e.message);}finally{btn.disabled=false;}
 }
-async function settleDebt(id){
-  if(!DEBTS.find(x=>x.id===id))return;
-  try{await api("/api/debts/"+id+"/settle",{method:"POST"});haptic("notif","success");toast("Долг закрыт ✓");await loadDebts();}
-  catch(e){toast("Ошибка");}
+
+/* pay (partial / full) */
+function openPayDebt(id){
+  const d=DEBTS.find(x=>x.id===id);if(!d)return;
+  PAY_ID=id;PAY_CUR=d.currency||"UZS";
+  document.getElementById("payDebtSheet").classList.add("open");
+  document.getElementById("pdTitle").textContent="Погасить · "+d.counterparty;
+  document.getElementById("pdCurLbl").textContent=curMeta(PAY_CUR).symbol;
+  document.getElementById("pdAmt").value="";updatePdSubmit();
+  const rem=(d.remaining!=null?d.remaining:d.amount)||0,pr=document.getElementById("pdPresets"),presets=[];
+  if(rem>0){presets.push(["50%",Math.round(rem*0.5)]);presets.push(["Всё "+moneyShort(rem,PAY_CUR),Math.round(rem)]);}
+  pr.innerHTML=presets.map(([l,v])=>`<div class="chip" data-v="${v}">${l}</div>`).join("");
+  pr.querySelectorAll(".chip").forEach(ch=>ch.onclick=()=>{document.getElementById("pdAmt").value=fmtNum(+ch.dataset.v,0,curMeta(PAY_CUR).grp);updatePdSubmit();haptic("sel");});
+  haptic("impact","light");setTimeout(()=>document.getElementById("pdAmt").focus(),300);
+}
+function closePayDebt(){document.getElementById("payDebtSheet").classList.remove("open");PAY_ID=null;}
+function pdVal(){return parseFloat((document.getElementById("pdAmt").value||"").replace(/[^\d.]/g,""))||0;}
+function updatePdSubmit(){document.getElementById("pdSubmit").disabled=!(pdVal()>0);}
+async function submitPayDebt(){
+  const amount=pdVal();if(!amount||!PAY_ID)return;
+  const btn=document.getElementById("pdSubmit");btn.disabled=true;
+  try{const r=await api("/api/debts/"+PAY_ID+"/pay",{method:"POST",body:{amount}});const closed=r.debt&&r.debt.status==="settled";haptic("notif","success");closePayDebt();toast(closed?"Долг закрыт ✓":"Погашено 💸");await loadDebts();}
+  catch(e){toast("Ошибка");}finally{btn.disabled=false;}
 }
 async function deleteDebt(id){
   if(!confirm("Удалить эту запись?"))return;
@@ -1015,9 +1070,12 @@ async function deleteDebt(id){
 }
 (function initDebts(){
   document.getElementById("debtScrim").onclick=closeDebtSheet;
+  document.getElementById("payDebtScrim").onclick=closePayDebt;
   document.getElementById("dSubmit").onclick=submitDebt;
+  document.getElementById("pdSubmit").onclick=submitPayDebt;
   document.getElementById("dWho").addEventListener("input",updateDSubmit);
   document.getElementById("dAmt").addEventListener("input",e=>{const v=e.target.value.replace(/[^\d]/g,"");e.target.value=v?fmtNum(+v,0,curMeta(CURCODE).grp):"";updateDSubmit();});
+  document.getElementById("pdAmt").addEventListener("input",e=>{const v=e.target.value.replace(/[^\d]/g,"");e.target.value=v?fmtNum(+v,0,curMeta(PAY_CUR).grp):"";updatePdSubmit();});
   document.querySelectorAll("#dDir button").forEach(b=>b.onclick=()=>{DEBT_DIR=b.dataset.d;document.querySelectorAll("#dDir button").forEach(x=>x.classList.toggle("on",x===b));haptic("sel");});
 })();
 </script>

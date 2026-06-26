@@ -42,12 +42,22 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+def _version_tag() -> str:
+    """Short deploy id — changes every Railway deploy, used to bust the
+    Telegram Mini App webview cache."""
+    return (os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("RAILWAY_DEPLOYMENT_ID") or "").strip()[:8]
+
+
 def webapp_url() -> str:
     url = os.getenv("WEBAPP_URL", "").strip().rstrip("/")
     if not url:
         dom = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
         if dom:
             url = "https://" + dom.rstrip("/")
+    if url:
+        tag = _version_tag()
+        if tag:
+            url += ("&" if "?" in url else "?") + "v=" + tag
     return url
 
 

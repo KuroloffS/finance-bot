@@ -100,6 +100,19 @@ TEXTS = {
         "goal_edit_deadline_prompt": "📅 Отправь новый срок (ГГГГ-ММ-ДД) или <code>-</code>, чтобы убрать.",
         "goal_deadline_set": "✅ Срок обновлён.",
         "goal_deadline_cleared": "✅ Срок убран.",
+        # ── Debts ──
+        "debt_new_prompt": (
+            "🤝 <b>Новый долг</b>\n"
+            "━━━━━━━━━━━━━━━━━━━\n\n"
+            "Напиши одним сообщением (или наговори 🎤), кто кому должен:\n\n"
+            "<code>Али должен мне 500 000 до 5 июля</code>\n"
+            "<code>Я должен Диме 1.2 млн к декабрю</code>\n\n"
+            "Срок можно не указывать."
+        ),
+        "debt_create_invalid": (
+            "🤔 Не понял долг.\nУкажи кто и сколько, например:\n"
+            "<code>Али должен мне 500к до 5 июля</code>"
+        ),
         # ── Currency ──
         "currency_prompt": (
             "💱 <b>Валюта</b>\n━━━━━━━━━━━━━━━━━━━\n\n"
@@ -219,6 +232,19 @@ TEXTS = {
         "goal_edit_deadline_prompt": "📅 Send a new deadline (YYYY-MM-DD), or <code>-</code> to clear it.",
         "goal_deadline_set": "✅ Deadline updated.",
         "goal_deadline_cleared": "✅ Deadline cleared.",
+        # ── Debts ──
+        "debt_new_prompt": (
+            "🤝 <b>New debt</b>\n"
+            "━━━━━━━━━━━━━━━━━━━\n\n"
+            "Send it in one message (or say it 🎤) — who owes whom:\n\n"
+            "<code>Ali owes me 500000 by July 5</code>\n"
+            "<code>I owe Dima 1.2m by December</code>\n\n"
+            "The deadline is optional."
+        ),
+        "debt_create_invalid": (
+            "🤔 Couldn't read that debt.\nSay who and how much, e.g.:\n"
+            "<code>Ali owes me 500k by July 5</code>"
+        ),
         # ── Currency ──
         "currency_prompt": (
             "💱 <b>Currency</b>\n━━━━━━━━━━━━━━━━━━━\n\n"

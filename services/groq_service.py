@@ -367,6 +367,81 @@ async def parse_amount_text(text: str, base_currency: str = DEFAULT_CURRENCY) ->
         return 0.0
 
 
+async def parse_debt_text(text: str, user_context: dict) -> dict:
+    """Extract a debt from free text / speech: who, how much, which way, by when.
+    direction='owed_to_me' when someone owes the user, 'i_owe' when the user owes.
+    Resolves relative deadlines against the supplied 'today'."""
+    lang = user_context.get("language", "ru")
+    base_currency = normalize_currency(user_context.get("currency"), DEFAULT_CURRENCY)
+    today = user_context.get("today", "")
+    codes_str = "/".join(CURRENCIES.keys())
+
+    if lang == "ru":
+        system_prompt = (
+            f"Извлеки данные о долге/займе из сообщения. Сегодня {today}.\n"
+            "direction: 'owed_to_me' если ДОЛЖНЫ пользователю («Али должен мне», «дал в долг Али», "
+            "«мне должен»); 'i_owe' если ДОЛЖЕН пользователь («я должен», «занял у», «взял у», «должен Али»).\n"
+            "counterparty — имя человека/компании. amount — сумма числом (слова «пятьсот тысяч», "
+            "«пол миллиона», «500к» переведи в число). "
+            f"currency — ISO-код (одно из {codes_str}; по умолчанию {base_currency}). "
+            "deadline — дата ГГГГ-ММ-ДД или null; относительные сроки («до 5 июля», «через неделю», "
+            "«к декабрю») переведи в конкретную дату относительно сегодня.\n"
+            'Ответь строго JSON: {"direction":"owed_to_me|i_owe","counterparty":"<строка>",'
+            '"amount":<число>,"currency":"<ISO>","deadline":"<ГГГГ-ММ-ДД|null>"}'
+        )
+    else:
+        system_prompt = (
+            f"Extract a debt/loan from the message. Today is {today}.\n"
+            "direction: 'owed_to_me' if someone owes the USER ('Ali owes me', 'I lent Ali'); "
+            "'i_owe' if the USER owes ('I owe', 'I borrowed from', 'I took from').\n"
+            "counterparty — the person/company name. amount — number (convert worded amounts). "
+            f"currency — ISO code (one of {codes_str}; default {base_currency}). "
+            "deadline — YYYY-MM-DD or null; convert relative deadlines ('by July 5', 'in a week') "
+            "to a concrete date relative to today.\n"
+            'Reply strictly JSON: {"direction":"owed_to_me|i_owe","counterparty":"<string>",'
+            '"amount":<number>,"currency":"<ISO>","deadline":"<YYYY-MM-DD|null>"}'
+        )
+
+    raw = ""
+    try:
+        def _call():
+            return client.chat.completions.create(
+                model=TEXT_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text},
+                ],
+                temperature=0.1,
+                max_tokens=200,
+                response_format={"type": "json_object"},
+            )
+
+        response = await asyncio.to_thread(_call)
+        raw = response.choices[0].message.content
+        logger.info("parse_debt -> %s", raw[:200])
+        data = _extract_json(raw)
+        direction = data.get("direction")
+        if direction not in ("owed_to_me", "i_owe"):
+            direction = "owed_to_me"
+        counterparty = str(data.get("counterparty") or "").strip()[:120]
+        amount = _to_float(data.get("amount"))
+        currency = normalize_currency(data.get("currency"), base_currency)
+        deadline = None
+        dl = data.get("deadline")
+        if dl and str(dl).lower() not in ("null", "none", ""):
+            try:
+                import datetime as _dt
+                deadline = _dt.date.fromisoformat(str(dl)[:10]).isoformat()
+            except ValueError:
+                deadline = None
+        return {"direction": direction, "counterparty": counterparty,
+                "amount": amount, "currency": currency, "deadline": deadline}
+    except Exception as e:
+        logger.error("parse_debt_text error: %s | raw=%s", e, raw[:200])
+        return {"direction": "owed_to_me", "counterparty": "", "amount": 0.0,
+                "currency": base_currency, "deadline": None}
+
+
 async def get_savings_tips(monthly_data: list, language: str, currency: str = DEFAULT_CURRENCY) -> str:
     if not monthly_data:
         return ""

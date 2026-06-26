@@ -23,6 +23,7 @@ from services.currency_service import (
 )
 from services.groq_service import get_savings_tips, parse_text_purchase
 from services.supabase_service import (
+    add_debt_payment,
     add_goal_contribution,
     create_debt,
     create_goal,
@@ -137,7 +138,8 @@ def create_app() -> FastAPI:
     async def index():
         idx = STATIC_DIR / "index.html"
         if idx.exists():
-            return FileResponse(str(idx))
+            # Always revalidate so a new deploy's Mini App HTML is picked up.
+            return FileResponse(str(idx), headers={"Cache-Control": "no-cache, must-revalidate"})
         return JSONResponse({"error": "app not built"}, status_code=503)
 
     @app.get("/api/me")
@@ -470,11 +472,17 @@ def create_app() -> FastAPI:
                 overdue = days_left < 0
             except (ValueError, TypeError):
                 pass
+        amount = _f(d.get("amount"))
+        paid = _f(d.get("paid_amount"))
+        remaining = max(0.0, amount - paid)
         return {
             "id": d.get("id"),
             "direction": d.get("direction", "owed_to_me"),
             "counterparty": d.get("counterparty", ""),
-            "amount": _f(d.get("amount")),
+            "amount": amount,
+            "paid_amount": paid,
+            "remaining": remaining,
+            "percent": round(paid / amount * 100, 1) if amount > 0 else 0.0,
             "currency": normalize_currency(d.get("currency"), DEFAULT_CURRENCY),
             "due_date": str(due)[:10] if due else None,
             "status": d.get("status", "open"),
@@ -493,7 +501,8 @@ def create_app() -> FastAPI:
         for d in debts:
             if d.get("status") != "open":
                 continue
-            amt = await convert(float(d.get("amount") or 0), normalize_currency(d.get("currency"), base), base)
+            remaining = max(0.0, float(d.get("amount") or 0) - float(d.get("paid_amount") or 0))
+            amt = await convert(remaining, normalize_currency(d.get("currency"), base), base)
             if d.get("direction") == "i_owe":
                 owe += amt
             else:
@@ -525,6 +534,18 @@ def create_app() -> FastAPI:
         )
         if not d:
             raise HTTPException(status_code=500, detail="could not create debt")
+        return {"ok": True, "debt": _debt_dto(d, now_local().date())}
+
+    class DebtPay(BaseModel):
+        amount: float
+
+    @app.post("/api/debts/{debt_id}/pay")
+    async def api_pay_debt(debt_id: int, b: DebtPay, user: dict = Depends(current_user)):
+        if b.amount is None or b.amount <= 0:
+            raise HTTPException(status_code=400, detail="amount must be > 0")
+        d = await add_debt_payment(user["telegram_id"], debt_id, float(b.amount))
+        if not d:
+            raise HTTPException(status_code=404, detail="debt not found")
         return {"ok": True, "debt": _debt_dto(d, now_local().date())}
 
     @app.post("/api/debts/{debt_id}/settle")

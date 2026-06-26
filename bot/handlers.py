@@ -21,6 +21,7 @@ from bot.keyboards import (
     analytics_keyboard,
     budget_presets_keyboard,
     currency_keyboard,
+    debts_keyboard,
     goal_delete_confirm_keyboard,
     goal_detail_keyboard,
     goals_list_keyboard,
@@ -43,6 +44,7 @@ from services.currency_service import (
 from services.groq_service import (
     get_savings_tips,
     parse_amount_text,
+    parse_debt_text,
     parse_goal_text,
     parse_photo_receipt,
     parse_text_purchase,
@@ -51,6 +53,7 @@ from services.groq_service import (
 from services.supabase_service import (
     add_goal_contribution,
     count_transactions,
+    create_debt,
     create_goal,
     delete_all_transactions,
     delete_goal,
@@ -84,6 +87,7 @@ from utils.formatters import (
     format_amount,
     format_analytics_card,
     format_budget_alert,
+    format_debt_created,
     format_debts_list,
     format_goal_card,
     format_goals_list,
@@ -127,6 +131,11 @@ def _webapp_url() -> str:
         dom = os.getenv("RAILWAY_PUBLIC_DOMAIN", "").strip()
         if dom:
             url = "https://" + dom.rstrip("/")
+    if url:
+        # Cache-bust the Mini App webview on each deploy (see main._version_tag).
+        tag = (os.getenv("RAILWAY_GIT_COMMIT_SHA") or os.getenv("RAILWAY_DEPLOYMENT_ID") or "").strip()[:8]
+        if tag:
+            url += ("&" if "?" in url else "?") + "v=" + tag
     return url
 
 
@@ -608,9 +617,9 @@ async def debts_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         logger.info("debts telegram_id=%s", user_id)
         debts = await get_debts(user_id)
         text = format_debts_list(debts, lang, today=now_local().date())
-        url = _webapp_url()
-        kb = webapp_keyboard(url, lang) if url else None
-        await update.message.reply_text(text, parse_mode="HTML", reply_markup=kb)
+        await update.message.reply_text(
+            text, parse_mode="HTML", reply_markup=debts_keyboard(_webapp_url(), lang)
+        )
     except Exception as e:
         logger.error("debts_handler error: %s", e)
         await update.message.reply_text(t("error_generic", "ru"))
@@ -768,6 +777,29 @@ async def _handle_pending_text(update: Update, context: ContextTypes.DEFAULT_TYP
         await update.message.reply_text(body, parse_mode="HTML", reply_markup=goal_detail_keyboard(goal, lang))
         return True
 
+    if ptype == "debt_new":
+        gd = await parse_debt_text(
+            text, {"language": lang, "currency": base_currency, "today": now_local().date().isoformat()}
+        )
+        counterparty = (gd.get("counterparty") or "").strip()
+        amount = gd.get("amount") or 0
+        if not counterparty or amount <= 0:
+            await update.message.reply_text(t("debt_create_invalid", lang), parse_mode="HTML")
+            return True  # keep pending so the user can retry
+        debt = await create_debt(
+            user_id, gd.get("direction", "owed_to_me"), counterparty, amount,
+            gd.get("currency") or base_currency, due_date=gd.get("deadline"),
+        )
+        context.user_data.pop("await", None)
+        if not debt:
+            await update.message.reply_text(t("error_generic", lang), parse_mode="HTML")
+            return True
+        await update.message.reply_text(
+            format_debt_created(debt, lang, today=now_local().date()),
+            parse_mode="HTML", reply_markup=debts_keyboard(_webapp_url(), lang),
+        )
+        return True
+
     if ptype == "goal_add":
         amount = _parse_money(text)
         if amount <= 0:  # voice / worded amount → ask the LLM to read the number
@@ -852,6 +884,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # ── Savings goals ──
         if data.startswith("goal:"):
             await _goal_callback(update, context, query, user_id, lang, data)
+            return
+
+        # ── Add a debt from chat (text/voice) ──
+        if data == "debt:new":
+            context.user_data["await"] = {"type": "debt_new"}
+            await query.answer()
+            await query.message.reply_text(t("debt_new_prompt", lang), parse_mode="HTML")
             return
 
         # ── Currency picker ──

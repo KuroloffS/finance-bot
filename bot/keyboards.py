@@ -16,6 +16,16 @@ def webapp_keyboard(url: str, lang: str = "ru") -> InlineKeyboardMarkup:
         [[InlineKeyboardButton(label, web_app=WebAppInfo(url=url))]]
     )
 
+
+def debts_keyboard(url: str, lang: str = "ru") -> InlineKeyboardMarkup:
+    """Debts overview actions: add-via-chat + (optionally) open the Mini App."""
+    add = "➕ Добавить долг" if lang == "ru" else "➕ Add a debt"
+    rows = [[InlineKeyboardButton(add, callback_data="debt:new")]]
+    if url:
+        open_lbl = "📱 Открыть приложение" if lang == "ru" else "📱 Open the app"
+        rows.append([InlineKeyboardButton(open_lbl, web_app=WebAppInfo(url=url))])
+    return InlineKeyboardMarkup(rows)
+
 # ───────────────────────── Menu button labels ─────────────────────────
 # These exact strings are also matched in handlers.BUTTON_ROUTES.
 

@@ -663,15 +663,26 @@ def _debt_due_str(due, lang: str, today: date | None) -> str:
     return f" · {until} {ds} · {tail}"
 
 
+def _debt_remaining(d: dict) -> float:
+    return max(0.0, float(d.get("amount", 0) or 0) - float(d.get("paid_amount", 0) or 0))
+
+
 def format_debts_list(debts: list, lang: str, today: date | None = None) -> str:
-    """Full debts overview for the bot: 'мне должны' and 'я должен', open only."""
+    """Full debts overview for the bot: 'мне должны' and 'я должен' (open),
+    amounts shown as the outstanding remainder + a closed-count footer."""
     head = "🤝 <b>Долги</b>" if lang == "ru" else "🤝 <b>Debts</b>"
     open_debts = [d for d in debts if d.get("status") == "open"]
+    settled = [d for d in debts if d.get("status") == "settled"]
+
+    def _closed_line():
+        return f"<i>✓ Закрыто: {len(settled)}</i>" if lang == "ru" else f"<i>✓ Closed: {len(settled)}</i>"
+
     if not open_debts:
-        empty = ("📭 Открытых долгов нет.\nДобавь в приложении — напомню о сроке."
+        empty = ("📭 Открытых долгов нет.\nДобавь через /debts или в приложении — напомню о сроке."
                  if lang == "ru" else
-                 "📭 No open debts.\nAdd one in the app — I'll remind you before it's due.")
-        return f"{head}\n{DIVIDER}\n\n{empty}"
+                 "📭 No open debts.\nAdd one via /debts or in the app — I'll remind you before it's due.")
+        base = f"{head}\n{DIVIDER}\n\n{empty}"
+        return base + ("\n\n" + _closed_line() if settled else "")
 
     mine = [d for d in open_debts if d.get("direction") == "owed_to_me"]
     theirs = [d for d in open_debts if d.get("direction") == "i_owe"]
@@ -679,28 +690,42 @@ def format_debts_list(debts: list, lang: str, today: date | None = None) -> str:
     def _line(d):
         cur = d.get("currency") or DEFAULT_CURRENCY
         who = escape(str(d.get("counterparty", "—")))
-        return f"• <b>{who}</b> — {_f(d.get('amount', 0), cur)}{_debt_due_str(d.get('due_date'), lang, today)}"
+        amt = _f(_debt_remaining(d), cur)
+        if float(d.get("paid_amount", 0) or 0) > 0:
+            of = "из" if lang == "ru" else "of"
+            amt += f" <i>({of} {_f(d.get('amount', 0), cur)})</i>"
+        return f"• <b>{who}</b> — {amt}{_debt_due_str(d.get('due_date'), lang, today)}"
+
+    def _group(items, title):
+        total = {}
+        for d in items:
+            cur = d.get("currency") or DEFAULT_CURRENCY
+            total[cur] = total.get(cur, 0) + _debt_remaining(d)
+        sub = " · ".join(_f(v, c) for c, v in total.items())
+        return ["", f"{title} · {sub}"] + [_line(d) for d in items]
 
     lines = [head, DIVIDER]
     if mine:
-        total = {}
-        for d in mine:
-            cur = d.get("currency") or DEFAULT_CURRENCY
-            total[cur] = total.get(cur, 0) + float(d.get("amount", 0) or 0)
-        sub = " · ".join(_f(v, c) for c, v in total.items())
-        lines.append("")
-        lines.append(f"📥 <b>Мне должны</b> · {sub}" if lang == "ru" else f"📥 <b>Owed to me</b> · {sub}")
-        lines += [_line(d) for d in mine]
+        lines += _group(mine, "📥 <b>Мне должны</b>" if lang == "ru" else "📥 <b>Owed to me</b>")
     if theirs:
-        total = {}
-        for d in theirs:
-            cur = d.get("currency") or DEFAULT_CURRENCY
-            total[cur] = total.get(cur, 0) + float(d.get("amount", 0) or 0)
-        sub = " · ".join(_f(v, c) for c, v in total.items())
-        lines.append("")
-        lines.append(f"📤 <b>Я должен</b> · {sub}" if lang == "ru" else f"📤 <b>I owe</b> · {sub}")
-        lines += [_line(d) for d in theirs]
+        lines += _group(theirs, "📤 <b>Я должен</b>" if lang == "ru" else "📤 <b>I owe</b>")
+    if settled:
+        lines += ["", _closed_line()]
     return "\n".join(lines)
+
+
+def format_debt_created(debt: dict, lang: str, today: date | None = None) -> str:
+    """Confirmation card after a debt is added from chat."""
+    cur = debt.get("currency") or DEFAULT_CURRENCY
+    who = escape(str(debt.get("counterparty", "—")))
+    amt = _f(debt.get("amount", 0), cur)
+    head = "✅ <b>Долг записан</b>" if lang == "ru" else "✅ <b>Debt saved</b>"
+    if debt.get("direction") == "owed_to_me":
+        body = f"📥 {who} должен тебе <b>{amt}</b>" if lang == "ru" else f"📥 {who} owes you <b>{amt}</b>"
+    else:
+        body = f"📤 Ты должен {who} <b>{amt}</b>" if lang == "ru" else f"📤 You owe {who} <b>{amt}</b>"
+    due = _debt_due_str(debt.get("due_date"), lang, today).lstrip(" ··").strip()
+    return f"{head}\n{body}" + (f"\n📅 {due}" if due else "")
 
 
 def format_debt_reminder(debts: list, lang: str, today: date | None = None) -> str:
@@ -727,7 +752,7 @@ def format_debt_reminder(debts: list, lang: str, today: date | None = None) -> s
             verb = f"{who} должен тебе" if lang == "ru" else f"{who} owes you"
         else:
             verb = f"Ты должен {who}" if lang == "ru" else f"You owe {who}"
-        lines.append(f"• {verb} <b>{_f(d.get('amount', 0), cur)}</b>{_debt_due_str(d.get('due_date'), lang, ref)}")
+        lines.append(f"• {verb} <b>{_f(_debt_remaining(d), cur)}</b>{_debt_due_str(d.get('due_date'), lang, ref)}")
     return "\n".join(lines)
 
 

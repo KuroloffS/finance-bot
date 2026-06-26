@@ -808,14 +808,66 @@ async def get_debts(user_id: int, only_open: bool = False) -> list[dict]:
         return []
 
 
-async def settle_debt(user_id: int, debt_id: int) -> dict:
-    """Mark a debt as settled (paid back). Returns the updated row or {}."""
+async def get_debt(user_id: int, debt_id: int) -> dict:
     try:
+        def _select():
+            return (
+                get_client()
+                .table("debts")
+                .select("*")
+                .eq("id", debt_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_select)
+        return result.data[0] if (result and result.data) else {}
+    except Exception as e:
+        logger.error("get_debt error user_id=%s id=%s: %s", user_id, debt_id, e)
+        return {}
+
+
+async def add_debt_payment(user_id: int, debt_id: int, amount: float) -> dict:
+    """Record a (partial) repayment. Bumps paid_amount, clamped to [0, amount];
+    auto-settles when fully paid. Returns the updated debt or {}."""
+    try:
+        debt = await get_debt(user_id, debt_id)
+        if not debt:
+            return {}
+        total = float(debt.get("amount", 0) or 0)
+        paid = float(debt.get("paid_amount", 0) or 0) + float(amount)
+        paid = max(0.0, min(paid, total))
+        status = "settled" if (total > 0 and paid >= total) else "open"
+
         def _update():
             return (
                 get_client()
                 .table("debts")
-                .update({"status": "settled"})
+                .update({"paid_amount": paid, "status": status})
+                .eq("id", debt_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_update)
+        return result.data[0] if (result and result.data) else {**debt, "paid_amount": paid, "status": status}
+    except Exception as e:
+        logger.error("add_debt_payment error user_id=%s id=%s: %s", user_id, debt_id, e)
+        return {}
+
+
+async def settle_debt(user_id: int, debt_id: int) -> dict:
+    """Mark a debt fully settled (paid in full). Returns the updated row or {}."""
+    try:
+        debt = await get_debt(user_id, debt_id)
+        if not debt:
+            return {}
+
+        def _update():
+            return (
+                get_client()
+                .table("debts")
+                .update({"status": "settled", "paid_amount": float(debt.get("amount", 0) or 0)})
                 .eq("id", debt_id)
                 .eq("user_id", user_id)
                 .execute()
