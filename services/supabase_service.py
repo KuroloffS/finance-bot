@@ -107,6 +107,7 @@ async def save_transaction(
     purchase_date: str | None = None,
     original_amount: float | None = None,
     original_currency: str | None = None,
+    tx_type: str = "expense",
 ) -> dict:
     try:
         # Validate/normalize an optional explicit date; fall back to today (Tashkent).
@@ -134,6 +135,7 @@ async def save_transaction(
                         # Stored only when the entry currency differs from the base.
                         "original_amount": original_amount,
                         "original_currency": original_currency,
+                        "type": tx_type if tx_type in ("expense", "income") else "expense",
                     }
                 )
                 .execute()
@@ -183,6 +185,7 @@ async def get_daily_spent_last_n(user_id: int, n: int = 7) -> list[float]:
                 .table("transactions")
                 .select("amount, purchase_date")
                 .eq("user_id", user_id)
+                .eq("type", "expense")
                 .gte("purchase_date", start.isoformat())
                 .execute()
             )
@@ -221,6 +224,7 @@ async def get_month_spent_through_day(user_id: int, year: int, month: int, day: 
                 .table("transactions")
                 .select("amount")
                 .eq("user_id", user_id)
+                .eq("type", "expense")
                 .gte("purchase_date", first.isoformat())
                 .lte("purchase_date", last.isoformat())
                 .execute()
@@ -493,7 +497,8 @@ async def mark_notif_sent(user_id: int, ntype: str, dedup_key: str) -> bool:
 # ───────────────────────── Date-range queries (digests) ─────────────────────────
 
 async def get_transactions_in_range(user_id: int, start_iso: str, end_iso: str) -> list[dict]:
-    """All transactions with purchase_date in [start_iso, end_iso] (inclusive)."""
+    """All EXPENSE transactions with purchase_date in [start_iso, end_iso] (inclusive).
+    Spend-only — powers digests/analytics, so income is excluded."""
     try:
         def _select():
             return (
@@ -501,6 +506,7 @@ async def get_transactions_in_range(user_id: int, start_iso: str, end_iso: str) 
                 .table("transactions")
                 .select("amount, category, purchase_date")
                 .eq("user_id", user_id)
+                .eq("type", "expense")
                 .gte("purchase_date", start_iso)
                 .lte("purchase_date", end_iso)
                 .execute()
@@ -928,3 +934,630 @@ async def delete_all_transactions(user_id: int) -> int:
     except Exception as e:
         logger.error("delete_all_transactions error user_id=%s: %s", user_id, e)
         return 0
+
+
+# ───────────────────────── Balance & period reports ─────────────────────────
+
+async def get_balance(user_id: int) -> dict:
+    """All-time wallet balance = sum(income) − sum(expense) in the base currency.
+    Returns {income, expense, balance}."""
+    try:
+        def _select():
+            return (
+                get_client()
+                .table("transactions")
+                .select("amount, type")
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_select)
+        income = expense = 0.0
+        for row in (result.data if (result and result.data) else []):
+            amt = float(row.get("amount") or 0)
+            if row.get("type") == "income":
+                income += amt
+            else:
+                expense += amt
+        return {"income": income, "expense": expense, "balance": income - expense}
+    except Exception as e:
+        logger.error("get_balance error user_id=%s: %s", user_id, e)
+        return {"income": 0.0, "expense": 0.0, "balance": 0.0}
+
+
+async def get_period_report(user_id: int, start_iso: str, end_iso: str) -> dict:
+    """Income/expense/balance + the operation rows for [start_iso, end_iso] (inclusive),
+    newest first. Powers the Mini App Reports (Отчёты) screen."""
+    try:
+        def _select():
+            return (
+                get_client()
+                .table("transactions")
+                .select("*")
+                .eq("user_id", user_id)
+                .gte("purchase_date", start_iso)
+                .lte("purchase_date", end_iso)
+                .order("purchase_date", desc=True)
+                .order("created_at", desc=True)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_select)
+        rows = result.data if (result and result.data) else []
+        income = sum(float(r.get("amount") or 0) for r in rows if r.get("type") == "income")
+        expense = sum(float(r.get("amount") or 0) for r in rows if r.get("type") != "income")
+        return {
+            "income": income,
+            "expense": expense,
+            "balance": income - expense,
+            "count": len(rows),
+            "transactions": rows,
+        }
+    except Exception as e:
+        logger.error("get_period_report error user_id=%s: %s", user_id, e)
+        return {"income": 0.0, "expense": 0.0, "balance": 0.0, "count": 0, "transactions": []}
+
+
+# ───────────────────────── Calendar events ─────────────────────────
+
+async def create_event(
+    user_id: int,
+    title: str,
+    event_date: str,
+    event_time: str | None = None,
+    note: str | None = None,
+    emoji: str = "📌",
+) -> dict:
+    try:
+        try:
+            ed = date.fromisoformat(str(event_date)[:10]).isoformat()
+        except (ValueError, TypeError):
+            ed = now_local().date().isoformat()
+
+        def _insert():
+            return (
+                get_client()
+                .table("events")
+                .insert({
+                    "user_id": user_id,
+                    "title": (title or "").strip()[:200] or "—",
+                    "event_date": ed,
+                    "event_time": (event_time or None),
+                    "note": (note or "").strip() or None,
+                    "emoji": emoji or "📌",
+                })
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_insert)
+        return result.data[0] if (result and result.data) else {}
+    except Exception as e:
+        logger.error("create_event error user_id=%s: %s", user_id, e)
+        return {}
+
+
+async def get_events_for_month(user_id: int, month_first: str) -> list[dict]:
+    """All events with event_date inside the month starting at `month_first`."""
+    try:
+        start = date.fromisoformat(month_first)
+        nxt = date(start.year + 1, 1, 1) if start.month == 12 else date(start.year, start.month + 1, 1)
+
+        def _select():
+            return (
+                get_client()
+                .table("events")
+                .select("*")
+                .eq("user_id", user_id)
+                .gte("event_date", start.isoformat())
+                .lt("event_date", nxt.isoformat())
+                .order("event_date", desc=False)
+                .order("event_time", desc=False, nullsfirst=True)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_select)
+        return result.data if (result and result.data) else []
+    except Exception as e:
+        logger.error("get_events_for_month error user_id=%s month=%s: %s", user_id, month_first, e)
+        return []
+
+
+async def get_upcoming_events(user_id: int, limit: int = 5) -> list[dict]:
+    """Events from today forward, soonest first — for the overview glance."""
+    try:
+        today = now_local().date().isoformat()
+
+        def _select():
+            return (
+                get_client()
+                .table("events")
+                .select("*")
+                .eq("user_id", user_id)
+                .gte("event_date", today)
+                .order("event_date", desc=False)
+                .order("event_time", desc=False, nullsfirst=True)
+                .limit(limit)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_select)
+        return result.data if (result and result.data) else []
+    except Exception as e:
+        logger.error("get_upcoming_events error user_id=%s: %s", user_id, e)
+        return []
+
+
+async def get_all_events(user_id: int) -> list[dict]:
+    """Every event for a user (used by the data export)."""
+    try:
+        def _select():
+            return (
+                get_client()
+                .table("events")
+                .select("*")
+                .eq("user_id", user_id)
+                .order("event_date", desc=False)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_select)
+        return result.data if (result and result.data) else []
+    except Exception as e:
+        logger.error("get_all_events error user_id=%s: %s", user_id, e)
+        return []
+
+
+async def update_event(user_id: int, event_id: int, fields: dict) -> dict:
+    allowed = {"title", "event_date", "event_time", "note", "emoji"}
+    patch = {k: v for k, v in (fields or {}).items() if k in allowed}
+    if not patch:
+        return {}
+    try:
+        def _update():
+            return (
+                get_client()
+                .table("events")
+                .update(patch)
+                .eq("id", event_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_update)
+        return result.data[0] if (result and result.data) else {}
+    except Exception as e:
+        logger.error("update_event error user_id=%s id=%s: %s", user_id, event_id, e)
+        return {}
+
+
+async def delete_event(user_id: int, event_id: int) -> bool:
+    try:
+        def _delete():
+            return (
+                get_client()
+                .table("events")
+                .delete()
+                .eq("id", event_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_delete)
+        return bool(result and result.data)
+    except Exception as e:
+        logger.error("delete_event error user_id=%s id=%s: %s", user_id, event_id, e)
+        return False
+
+
+# ───────────────────────── Recurring payments ─────────────────────────
+
+def _advance_due(d: date, period: str, anchor_day: int | None = None) -> date:
+    """Next due date after one period. `anchor_day` preserves the intended billing
+    day across short months (e.g. the 31st), clamping only when the month is shorter."""
+    if period == "weekly":
+        return d + timedelta(days=7)
+    import calendar as _cal
+    day = anchor_day or d.day
+    if period == "yearly":
+        last = _cal.monthrange(d.year + 1, d.month)[1]
+        return date(d.year + 1, d.month, min(day, last))
+    # monthly (default)
+    m = d.month + 1
+    y = d.year + (1 if m > 12 else 0)
+    m = 1 if m > 12 else m
+    last = _cal.monthrange(y, m)[1]
+    return date(y, m, min(day, last))
+
+
+async def create_payment(
+    user_id: int,
+    name: str,
+    category: str,
+    amount: float,
+    currency: str,
+    period: str = "monthly",
+    next_due_date: str | None = None,
+    note: str | None = None,
+) -> dict:
+    try:
+        period = period if period in ("weekly", "monthly", "yearly") else "monthly"
+        try:
+            ndd = date.fromisoformat(str(next_due_date)[:10]) if next_due_date else now_local().date()
+        except (ValueError, TypeError):
+            ndd = now_local().date()
+
+        def _insert():
+            return (
+                get_client()
+                .table("payments")
+                .insert({
+                    "user_id": user_id,
+                    "name": (name or "").strip()[:120] or "—",
+                    "category": (category or "Подписка").strip()[:60] or "Подписка",
+                    "amount": float(amount),
+                    "currency": currency,
+                    "period": period,
+                    "next_due_date": ndd.isoformat(),
+                    "note": (note or "").strip() or None,
+                    "status": "active",
+                })
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_insert)
+        return result.data[0] if (result and result.data) else {}
+    except Exception as e:
+        logger.error("create_payment error user_id=%s: %s", user_id, e)
+        return {}
+
+
+async def get_payments(user_id: int) -> list[dict]:
+    """All recurring payments, soonest due first."""
+    try:
+        def _select():
+            return (
+                get_client()
+                .table("payments")
+                .select("*")
+                .eq("user_id", user_id)
+                .order("next_due_date", desc=False)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_select)
+        return result.data if (result and result.data) else []
+    except Exception as e:
+        logger.error("get_payments error user_id=%s: %s", user_id, e)
+        return []
+
+
+async def get_payment(user_id: int, payment_id: int) -> dict:
+    try:
+        def _select():
+            return (
+                get_client()
+                .table("payments")
+                .select("*")
+                .eq("id", payment_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_select)
+        return result.data[0] if (result and result.data) else {}
+    except Exception as e:
+        logger.error("get_payment error user_id=%s id=%s: %s", user_id, payment_id, e)
+        return {}
+
+
+async def update_payment(user_id: int, payment_id: int, fields: dict) -> dict:
+    allowed = {"name", "category", "amount", "currency", "period", "next_due_date", "note", "status"}
+    patch = {k: v for k, v in (fields or {}).items() if k in allowed}
+    if not patch:
+        return await get_payment(user_id, payment_id)
+    try:
+        def _update():
+            return (
+                get_client()
+                .table("payments")
+                .update(patch)
+                .eq("id", payment_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_update)
+        return result.data[0] if (result and result.data) else {}
+    except Exception as e:
+        logger.error("update_payment error user_id=%s id=%s: %s", user_id, payment_id, e)
+        return {}
+
+
+async def mark_payment_paid(user_id: int, payment_id: int) -> dict:
+    """Mark the current cycle paid: stamp last_paid_date=today and roll next_due_date
+    forward by one period. Returns the updated payment (or {})."""
+    try:
+        p = await get_payment(user_id, payment_id)
+        if not p:
+            return {}
+        today = now_local().date()
+        try:
+            cur_due = date.fromisoformat(str(p.get("next_due_date"))[:10])
+        except (ValueError, TypeError):
+            cur_due = today
+        anchor = cur_due.day  # keep the original billing day across short months
+        nxt = _advance_due(cur_due, p.get("period", "monthly"), anchor_day=anchor)
+        # Never leave the next due date in the past (e.g. long-overdue payment).
+        while nxt <= today:
+            nxt = _advance_due(nxt, p.get("period", "monthly"), anchor_day=anchor)
+
+        def _update():
+            return (
+                get_client()
+                .table("payments")
+                .update({"last_paid_date": today.isoformat(), "next_due_date": nxt.isoformat()})
+                .eq("id", payment_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_update)
+        return result.data[0] if (result and result.data) else {}
+    except Exception as e:
+        logger.error("mark_payment_paid error user_id=%s id=%s: %s", user_id, payment_id, e)
+        return {}
+
+
+async def delete_payment(user_id: int, payment_id: int) -> bool:
+    try:
+        def _delete():
+            return (
+                get_client()
+                .table("payments")
+                .delete()
+                .eq("id", payment_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_delete)
+        return bool(result and result.data)
+    except Exception as e:
+        logger.error("delete_payment error user_id=%s id=%s: %s", user_id, payment_id, e)
+        return False
+
+
+# ───────────────────────── Task folders ─────────────────────────
+
+async def create_task_folder(user_id: int, name: str, emoji: str = "📁") -> dict:
+    try:
+        def _insert():
+            return (
+                get_client()
+                .table("task_folders")
+                .insert({"user_id": user_id, "name": (name or "").strip()[:80] or "—", "emoji": emoji or "📁"})
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_insert)
+        return result.data[0] if (result and result.data) else {}
+    except Exception as e:
+        logger.error("create_task_folder error user_id=%s: %s", user_id, e)
+        return {}
+
+
+async def get_task_folders(user_id: int) -> list[dict]:
+    try:
+        def _select():
+            return (
+                get_client()
+                .table("task_folders")
+                .select("*")
+                .eq("user_id", user_id)
+                .order("created_at", desc=False)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_select)
+        return result.data if (result and result.data) else []
+    except Exception as e:
+        logger.error("get_task_folders error user_id=%s: %s", user_id, e)
+        return []
+
+
+async def delete_task_folder(user_id: int, folder_id: int) -> bool:
+    """Delete a folder. Tasks in it keep existing (folder_id set null via FK)."""
+    try:
+        def _delete():
+            return (
+                get_client()
+                .table("task_folders")
+                .delete()
+                .eq("id", folder_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_delete)
+        return bool(result and result.data)
+    except Exception as e:
+        logger.error("delete_task_folder error user_id=%s id=%s: %s", user_id, folder_id, e)
+        return False
+
+
+# ───────────────────────── Tasks ─────────────────────────
+
+async def create_task(
+    user_id: int,
+    title: str,
+    priority: str | None = None,
+    due_date: str | None = None,
+    folder_id: int | None = None,
+    tags: list | None = None,
+    note: str | None = None,
+) -> dict:
+    try:
+        dd = None
+        if due_date:
+            try:
+                dd = date.fromisoformat(str(due_date)[:10]).isoformat()
+            except (ValueError, TypeError):
+                dd = None
+        prio = priority if priority in ("critical", "high", "medium", "low") else None
+        clean_tags = [str(t).strip()[:30] for t in (tags or []) if str(t).strip()][:10]
+
+        def _insert():
+            return (
+                get_client()
+                .table("tasks")
+                .insert({
+                    "user_id": user_id,
+                    "title": (title or "").strip()[:200] or "—",
+                    "status": "active",
+                    "priority": prio,
+                    "due_date": dd,
+                    "folder_id": folder_id,
+                    "tags": clean_tags,
+                    "note": (note or "").strip() or None,
+                })
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_insert)
+        return result.data[0] if (result and result.data) else {}
+    except Exception as e:
+        logger.error("create_task error user_id=%s: %s", user_id, e)
+        return {}
+
+
+async def get_tasks(user_id: int) -> list[dict]:
+    """All tasks, newest first. The Mini App filters by status/priority/folder client-side."""
+    try:
+        def _select():
+            return (
+                get_client()
+                .table("tasks")
+                .select("*")
+                .eq("user_id", user_id)
+                .order("created_at", desc=True)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_select)
+        return result.data if (result and result.data) else []
+    except Exception as e:
+        logger.error("get_tasks error user_id=%s: %s", user_id, e)
+        return []
+
+
+async def get_task(user_id: int, task_id: int) -> dict:
+    try:
+        def _select():
+            return (
+                get_client()
+                .table("tasks")
+                .select("*")
+                .eq("id", task_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_select)
+        return result.data[0] if (result and result.data) else {}
+    except Exception as e:
+        logger.error("get_task error user_id=%s id=%s: %s", user_id, task_id, e)
+        return {}
+
+
+async def update_task(user_id: int, task_id: int, fields: dict) -> dict:
+    """Patch allowed task fields. Setting status='done' stamps completed_at;
+    moving back to active/cancelled clears it."""
+    allowed = {"title", "status", "priority", "due_date", "folder_id", "tags", "note"}
+    patch = {k: v for k, v in (fields or {}).items() if k in allowed}
+    if "status" in patch:
+        if patch["status"] == "done":
+            patch["completed_at"] = now_local().isoformat()
+        else:
+            patch["completed_at"] = None
+    if not patch:
+        return await get_task(user_id, task_id)
+    try:
+        def _update():
+            return (
+                get_client()
+                .table("tasks")
+                .update(patch)
+                .eq("id", task_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_update)
+        return result.data[0] if (result and result.data) else {}
+    except Exception as e:
+        logger.error("update_task error user_id=%s id=%s: %s", user_id, task_id, e)
+        return {}
+
+
+async def delete_task(user_id: int, task_id: int) -> bool:
+    try:
+        def _delete():
+            return (
+                get_client()
+                .table("tasks")
+                .delete()
+                .eq("id", task_id)
+                .eq("user_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_delete)
+        return bool(result and result.data)
+    except Exception as e:
+        logger.error("delete_task error user_id=%s id=%s: %s", user_id, task_id, e)
+        return False
+
+
+# ───────────────────────── Account data management ─────────────────────────
+
+async def wipe_user_data(user_id: int) -> dict:
+    """Delete all of a user's content (transactions, goals, debts, events,
+    payments, tasks, folders) but keep the account row. Returns per-table counts."""
+    tables = ["transactions", "goals", "debts", "events", "payments", "tasks", "task_folders"]
+    counts = {}
+    for t in tables:
+        try:
+            def _delete(tbl=t):
+                return (
+                    get_client()
+                    .table(tbl)
+                    .delete(count="exact")
+                    .eq("user_id", user_id)
+                    .execute()
+                )
+
+            result = await asyncio.to_thread(_delete)
+            counts[t] = result.count if (result and result.count is not None) else (len(result.data) if (result and result.data) else 0)
+        except Exception as e:
+            logger.error("wipe_user_data error user_id=%s table=%s: %s", user_id, t, e)
+            counts[t] = 0
+    return counts
+
+
+async def delete_account(user_id: int) -> bool:
+    """Delete the user row. All child rows cascade via FK (on delete cascade)."""
+    try:
+        def _delete():
+            return (
+                get_client()
+                .table("users")
+                .delete()
+                .eq("telegram_id", user_id)
+                .execute()
+            )
+
+        result = await asyncio.to_thread(_delete)
+        return bool(result and result.data)
+    except Exception as e:
+        logger.error("delete_account error user_id=%s: %s", user_id, e)
+        return False
