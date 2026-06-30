@@ -135,10 +135,27 @@ def delta_chip(pct, lang: str = "ru") -> str:
 def format_saved_card(
     result: dict, lang: str, input_type: str = "text",
     currency: str = DEFAULT_CURRENCY, fx_note: str | None = None,
+    is_income: bool = False,
 ) -> str:
     cat = result.get("category", "Другое")
     emoji = CATEGORY_EMOJI.get(cat, "📦")
     src = INPUT_EMOJI.get(input_type, "")
+
+    if is_income:
+        # Income has no meaningful expense category — show the amount in green.
+        title = "✅ <b>Записал доход</b>" if lang == "ru" else "✅ <b>Income saved</b>"
+        if src:
+            title = f"{title} {src}"
+        lines = [title, DIVIDER, "", f"💰 <b>{_f(result.get('amount'), currency)}</b>"]
+        if fx_note:
+            lines.append(f"💱 <i>{escape(fx_note)}</i>")
+        merchant = result.get("merchant")
+        if merchant:
+            lines.append(f"🏪 {escape(str(merchant))}")
+        desc = result.get("description")
+        if desc and str(desc).strip() and str(desc).strip().lower() != cat.lower():
+            lines.append(f"📝 {escape(str(desc))}")
+        return "\n".join(lines)
 
     title = "✅ <b>Записал трату</b>" if lang == "ru" else "✅ <b>Saved</b>"
     if src:
@@ -545,6 +562,31 @@ def format_debt_created(debt: dict, lang: str, today: date | None = None) -> str
         body = f"📤 Ты должен {who} <b>{amt}</b>" if lang == "ru" else f"📤 You owe {who} <b>{amt}</b>"
     due = _debt_due_str(debt.get("due_date"), lang, today).lstrip(" ··").strip()
     return f"{head}\n{body}" + (f"\n📅 {due}" if due else "")
+
+
+def format_payment_created(payment: dict, lang: str, currency: str = DEFAULT_CURRENCY) -> str:
+    """Confirmation card after a recurring payment is added from chat."""
+    cur = payment.get("currency") or currency
+    name = escape(str(payment.get("name", "—")))
+    amt = _f(payment.get("amount", 0), cur)
+    period = payment.get("period", "monthly")
+    per = (
+        {"weekly": "в неделю", "monthly": "в месяц", "yearly": "в год"}.get(period, "в месяц")
+        if lang == "ru"
+        else {"weekly": "/week", "monthly": "/month", "yearly": "/year"}.get(period, "/month")
+    )
+    head = "✅ <b>Платёж добавлен</b>" if lang == "ru" else "✅ <b>Payment saved</b>"
+    sep = " " if lang == "ru" else ""
+    lines = [head, f"🔁 {name} — <b>{amt}</b>{sep}{per}"]
+    nd = payment.get("next_due_date")
+    if nd:
+        try:
+            d = date.fromisoformat(str(nd)[:10])
+            when = _short_date(d, lang)
+            lines.append(f"📅 {'следующее списание' if lang == 'ru' else 'next charge'}: {when}")
+        except (ValueError, TypeError):
+            pass
+    return "\n".join(lines)
 
 
 def format_debt_reminder(debts: list, lang: str, today: date | None = None) -> str:

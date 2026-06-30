@@ -40,10 +40,12 @@ from services.currency_service import (
     normalize_currency,
 )
 from services.groq_service import (
+    classify_intent,
     get_savings_tips,
     parse_amount_text,
     parse_debt_text,
     parse_goal_text,
+    parse_payment_text,
     parse_photo_receipt,
     parse_text_purchase,
     transcribe_audio,
@@ -53,6 +55,7 @@ from services.supabase_service import (
     count_transactions,
     create_debt,
     create_goal,
+    create_payment,
     delete_all_transactions,
     delete_goal,
     delete_last_transaction,
@@ -83,6 +86,7 @@ from utils.formatters import (
     format_history,
     format_large_tx_alert,
     format_month_overview,
+    format_payment_created,
     format_saved_card,
     format_tips,
     goal_progress,
@@ -216,12 +220,14 @@ async def _save_and_reply(
     currency: str,
     user: dict,
     prior_avg: float = 0.0,
+    tx_type: str = "expense",
 ) -> None:
-    """Persist a parsed purchase (converting currency if needed) and reply with a
-    beautiful card + inline actions, then fire any smart notifications."""
+    """Persist a parsed transaction (expense or income; converting currency if needed)
+    and reply with a beautiful card + inline actions, then fire any smart notifications."""
     if not result.get("amount"):
         await update.message.reply_text(t("parse_error", lang), parse_mode="HTML")
         return
+    is_income = tx_type == "income"
 
     # ── Multi-currency: convert the entry amount into the user's base currency ──
     entry_currency = normalize_currency(result.get("currency"), currency)
@@ -244,23 +250,25 @@ async def _save_and_reply(
         result["category"],
         result.get("description", ""),
         result.get("merchant"),
-        result.get("advice", ""),
+        result.get("advice", "") if not is_income else "",
         input_type,
         original_amount=original_amount,
         original_currency=original_currency,
+        tx_type=tx_type,
     )
     tx_id = saved.get("id") if saved else None
 
-    card = format_saved_card(result, lang, input_type, currency=currency, fx_note=fx_note)
+    card = format_saved_card(result, lang, input_type, currency=currency, fx_note=fx_note, is_income=is_income)
     await update.message.reply_text(
         card, parse_mode="HTML", reply_markup=saved_card_keyboard(tx_id, lang)
     )
 
-    # Smart notification: only the large-purchase nudge (budget model removed).
-    await _send_alerts(
-        context, update.effective_chat.id, user_id, lang, currency,
-        base_amount, result.get("category", ""), prior_avg, user,
-    )
+    # Large-purchase nudge applies to spending only — never to income.
+    if not is_income:
+        await _send_alerts(
+            context, update.effective_chat.id, user_id, lang, currency,
+            base_amount, result.get("category", ""), prior_avg, user,
+        )
 
 
 async def _send_alerts(
@@ -281,6 +289,100 @@ async def _send_alerts(
             )
         except Exception as e:
             logger.warning("large-tx alert failed user=%s: %s", user_id, e)
+
+
+async def _route_freeform(update: Update, context: ContextTypes.DEFAULT_TYPE,
+                          text: str, user: dict, input_type: str) -> None:
+    """Classify a free-form money message (typed, voice, or audio) and route it to the
+    right flow: expense, income, savings goal, recurring payment, or debt. Anything
+    ambiguous — or a goal/payment/debt we can't fully parse — falls back to an expense
+    so a real purchase is never dropped."""
+    lang = user.get("language", "ru")
+    user_id = update.effective_user.id
+    currency = _currency_of(user)
+    ctx = {"language": lang, "currency": currency, "today": now_local().date().isoformat()}
+
+    # Classify intent and prefetch the month summary (for the expense path) in parallel.
+    intent, summary = await asyncio.gather(
+        classify_intent(text, ctx),
+        get_monthly_summary(user_id),
+    )
+    logger.info("freeform telegram_id=%s intent=%s input=%s", user_id, intent, input_type)
+
+    if intent == "goal":
+        gd = await parse_goal_text(text, ctx)
+        title = (gd.get("title") or "").strip()[:120]
+        if title and (gd.get("amount") or 0) > 0:
+            # Parsed a real goal — commit to it (success OR a surfaced DB error),
+            # never silently fall back to an expense once intent is clear.
+            goal = await create_goal(
+                user_id, title, gd["amount"], gd.get("currency") or currency,
+                emoji=_guess_goal_emoji(title), deadline=gd.get("deadline"),
+            )
+            if not goal:
+                await update.message.reply_text(t("error_generic", lang), parse_mode="HTML")
+                return
+            today = now_local().date()
+            body = (
+                f"{t('goal_created', lang)}\n\n"
+                f"{format_goal_card(goal, lang, today=today)}\n\n<i>{t('goal_detail_hint', lang)}</i>"
+            )
+            await update.message.reply_text(
+                body, parse_mode="HTML", reply_markup=goal_detail_keyboard(goal, lang)
+            )
+            return
+        # couldn't read a goal → fall through and save as an expense
+
+    elif intent == "payment":
+        pd = await parse_payment_text(text, ctx)
+        if (pd.get("amount") or 0) > 0:
+            cat = "Подписка" if lang == "ru" else "Subscription"
+            pay = await create_payment(
+                user_id, pd.get("name") or cat, cat, pd["amount"],
+                pd.get("currency") or currency, period=pd.get("period", "monthly"),
+                next_due_date=pd.get("next_due_date"),
+            )
+            if not pay:
+                await update.message.reply_text(t("error_generic", lang), parse_mode="HTML")
+                return
+            await update.message.reply_text(
+                format_payment_created(pay, lang, currency=currency), parse_mode="HTML"
+            )
+            return
+        # couldn't read a payment → fall through and save as an expense
+
+    elif intent == "debt":
+        dd = await parse_debt_text(text, ctx)
+        counterparty = (dd.get("counterparty") or "").strip()
+        if counterparty and (dd.get("amount") or 0) > 0:
+            debt = await create_debt(
+                user_id, dd.get("direction", "owed_to_me"), counterparty, dd["amount"],
+                dd.get("currency") or currency, due_date=dd.get("deadline"),
+            )
+            if not debt:
+                await update.message.reply_text(t("error_generic", lang), parse_mode="HTML")
+                return
+            await update.message.reply_text(
+                format_debt_created(debt, lang, today=now_local().date()),
+                parse_mode="HTML", reply_markup=debts_keyboard(_webapp_url(), lang),
+            )
+            return
+        # couldn't read a debt → fall through and save as an expense
+
+    # expense (default) or income
+    tx_type = "income" if intent == "income" else "expense"
+    user_context, currency, prior_avg = await _build_context(user, user_id, summary)
+    result = await parse_text_purchase(text, user_context)
+    if tx_type == "income" and (result.get("amount") or 0) <= 0:
+        # The purchase parser zeroes out non-spend phrasing ("нашёл 100 тысяч") —
+        # fall back to the plain amount reader so income isn't lost.
+        amt = await parse_amount_text(text, currency)
+        if amt > 0:
+            result = {"amount": amt, "currency": currency, "category": "Другое",
+                      "merchant": None, "description": "", "advice": ""}
+    await _save_and_reply(
+        update, context, result, lang, user_id, input_type, currency, user, prior_avg, tx_type=tx_type,
+    )
 
 
 async def _goals_payload(user_id: int, lang: str):
@@ -1053,12 +1155,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         logger.info("text message telegram_id=%s", user_id)
 
         await _typing(update)
-        # User row and month summary are independent — fetch them concurrently.
-        user, summary = await asyncio.gather(_get_user(update), get_monthly_summary(user_id))
-        lang = user.get("language", "ru")
-        user_context, currency, prior_avg = await _build_context(user, user_id, summary)
-        result = await parse_text_purchase(label, user_context)
-        await _save_and_reply(update, context, result, lang, user_id, "text", currency, user, prior_avg)
+        user = await _get_user(update)
+        await _route_freeform(update, context, label, user, "text")
     except Exception as e:
         logger.error("text_handler error: %s", e)
         await update.message.reply_text(t("error_generic", "ru"))
@@ -1090,9 +1188,7 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             if await _handle_pending_text(update, context, pend, transcribed):
                 return
         await _typing(update)
-        user_context, currency, prior_avg = await _build_context(user, user_id)
-        result = await parse_text_purchase(transcribed, user_context)
-        await _save_and_reply(update, context, result, lang, user_id, "voice", currency, user, prior_avg)
+        await _route_freeform(update, context, transcribed, user, "voice")
     except Exception as e:
         logger.error("voice_handler error: %s", e)
         await update.message.reply_text(t("error_generic", "ru"))
@@ -1128,9 +1224,7 @@ async def audio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             if await _handle_pending_text(update, context, pend, transcribed):
                 return
         await _typing(update)
-        user_context, currency, prior_avg = await _build_context(user, user_id)
-        result = await parse_text_purchase(transcribed, user_context)
-        await _save_and_reply(update, context, result, lang, user_id, "audio", currency, user, prior_avg)
+        await _route_freeform(update, context, transcribed, user, "audio")
     except Exception as e:
         logger.error("audio_handler error: %s", e)
         await update.message.reply_text(t("error_generic", "ru"))

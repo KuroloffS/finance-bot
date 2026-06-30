@@ -438,6 +438,156 @@ async def parse_debt_text(text: str, user_context: dict) -> dict:
                 "currency": base_currency, "deadline": None}
 
 
+_INTENTS = ("expense", "income", "goal", "payment", "debt")
+
+
+async def classify_intent(text: str, user_context: dict) -> str:
+    """Decide what a free-form money message is about. Returns one of
+    'expense' | 'income' | 'goal' | 'payment' | 'debt'. Defaults to 'expense'
+    on anything ambiguous or on error, so a plain purchase is never lost."""
+    lang = user_context.get("language", "ru")
+    if lang == "ru":
+        system_prompt = (
+            "Определи НАМЕРЕНИЕ финансового сообщения и верни строго JSON "
+            '{"intent":"<одно значение>"}. Значения:\n'
+            "- expense — обычная трата/покупка, а также ПОГАШЕНИЕ/ВОЗВРАТ долга, когда ТЫ отдаёшь деньги "
+            "(«кофе 15000», «потратил 50к на продукты», «оплатил такси 25000», «отдал долг Диме 500к», "
+            "«вернул долг 1 млн», «погасил кредит»).\n"
+            "- income — поступление денег ТЕБЕ («получил зарплату 5 млн», «нашёл 100 тысяч», "
+            "«премия 2 млн», «мне вернули долг», «Дима отдал мне долг»).\n"
+            "- goal — желание/цель НАКОПИТЬ («хочу накопить на машину», «коплю на отпуск», "
+            "«цель: 10 млн к декабрю»).\n"
+            "- payment — РЕГУЛЯРНЫЙ платёж или подписка с периодичностью («нетфликс 50к в месяц», "
+            "«аренда 3 млн ежемесячно», «подписка спотифай каждый месяц», «интернет 200к в месяц»).\n"
+            "- debt — НОВЫЙ долг/займ между людьми, который только что возник («Али должен мне 200к», "
+            "«я занял у Димы 1 млн», «дал другу в долг 300к»).\n"
+            "Правила: если есть периодичность (в месяц/ежемесячно/каждый месяц/в год/в неделю) и это "
+            "регулярный платёж — payment. ПОГАШЕНИЕ долга (ты отдаёшь деньги) — expense; когда долг "
+            "возвращают ТЕБЕ — income; debt только для НОВОГО долга. Если просто потратил один раз — expense. "
+            "Если сомневаешься — expense.\n"
+            '{"intent":"expense|income|goal|payment|debt"}'
+        )
+    else:
+        system_prompt = (
+            "Classify the INTENT of a money message and return strictly JSON "
+            '{"intent":"<one value>"}. Values:\n'
+            "- expense — an ordinary spend/purchase, AND repaying/paying back a debt when YOU give money out "
+            "('coffee 15000', 'spent 50k on groceries', 'paid 25000 for a taxi', 'paid Dima back 500k', 'repaid my loan').\n"
+            "- income — money RECEIVED by the user ('got my 5M salary', 'found 100 thousand', "
+            "'2M bonus', 'got paid back', 'Dima returned the money he owed me').\n"
+            "- goal — a wish/target to SAVE UP ('I want to save for a car', 'saving for a vacation', "
+            "'goal: 10M by December').\n"
+            "- payment — a RECURRING payment or subscription with a period ('netflix 50k a month', "
+            "'rent 3M monthly', 'spotify subscription every month', 'internet 200k per month').\n"
+            "- debt — a NEW loan/debt between people that just arose ('Ali owes me 200k', "
+            "'I borrowed 1M from Dima', 'I lent a friend 300k').\n"
+            "Rules: if there's a period (a month/monthly/every month/a year/a week) and it's a recurring "
+            "charge — payment. Repaying a debt (you pay money out) — expense; money returned TO you — income; "
+            "debt is only for a NEW loan. A one-off spend is expense. When unsure — expense.\n"
+            '{"intent":"expense|income|goal|payment|debt"}'
+        )
+
+    raw = ""
+    try:
+        def _call():
+            return client.chat.completions.create(
+                model=TEXT_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text},
+                ],
+                temperature=0.0,
+                max_tokens=20,
+                response_format={"type": "json_object"},
+            )
+
+        response = await asyncio.to_thread(_call)
+        raw = response.choices[0].message.content
+        logger.info("classify_intent -> %s", raw[:120])
+        intent = str(_extract_json(raw).get("intent") or "").strip().lower()
+        return intent if intent in _INTENTS else "expense"
+    except Exception as e:
+        logger.error("classify_intent error: %s | raw=%s", e, raw[:200])
+        return "expense"
+
+
+async def parse_payment_text(text: str, user_context: dict) -> dict:
+    """Extract a recurring payment {name, amount, currency, period, next_due_date}
+    from free text or transcribed speech. period in weekly|monthly|yearly."""
+    lang = user_context.get("language", "ru")
+    base_currency = normalize_currency(user_context.get("currency"), DEFAULT_CURRENCY)
+    today = user_context.get("today", "")
+    codes_str = "/".join(CURRENCIES.keys())
+
+    if lang == "ru":
+        system_prompt = (
+            f"Извлеки данные о РЕГУЛЯРНОМ платеже/подписке из сообщения. Сегодня {today}.\n"
+            "Верни строго JSON: name (короткое название, напр. «Netflix», «Аренда», «Интернет»), "
+            "amount (сумма за один период — число), "
+            f"currency (ISO-код, одно из {codes_str}; по умолчанию {base_currency}), "
+            "period ('weekly'|'monthly'|'yearly'), "
+            "next_due_date (дата ГГГГ-ММ-ДД следующего списания или null).\n"
+            "«в месяц/ежемесячно/каждый месяц» → monthly, «в год/ежегодно» → yearly, "
+            "«в неделю/еженедельно» → weekly; если период не указан — monthly. "
+            "Суммы словами переведи в число. Если суммы нет — amount = 0.\n"
+            '{"name":"<строка>","amount":<число>,"currency":"<ISO>",'
+            '"period":"weekly|monthly|yearly","next_due_date":"<ГГГГ-ММ-ДД|null>"}'
+        )
+    else:
+        system_prompt = (
+            f"Extract a RECURRING payment/subscription from the message. Today is {today}.\n"
+            "Return strictly JSON: name (short name e.g. 'Netflix', 'Rent', 'Internet'), "
+            "amount (amount per period as a number), "
+            f"currency (ISO code, one of {codes_str}; default {base_currency}), "
+            "period ('weekly'|'monthly'|'yearly'), "
+            "next_due_date (date YYYY-MM-DD of the next charge or null).\n"
+            "'a month/monthly/every month' → monthly, 'a year/yearly' → yearly, "
+            "'a week/weekly' → weekly; if no period is given — monthly. "
+            "Convert worded amounts into a number. If no amount — amount = 0.\n"
+            '{"name":"<string>","amount":<number>,"currency":"<ISO>",'
+            '"period":"weekly|monthly|yearly","next_due_date":"<YYYY-MM-DD|null>"}'
+        )
+
+    raw = ""
+    try:
+        def _call():
+            return client.chat.completions.create(
+                model=TEXT_MODEL,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": text},
+                ],
+                temperature=0.1,
+                max_tokens=200,
+                response_format={"type": "json_object"},
+            )
+
+        response = await asyncio.to_thread(_call)
+        raw = response.choices[0].message.content
+        logger.info("parse_payment -> %s", raw[:200])
+        data = _extract_json(raw)
+        name = str(data.get("name") or "").strip()[:120]
+        amount = _to_float(data.get("amount"))
+        currency = normalize_currency(data.get("currency"), base_currency)
+        period = str(data.get("period") or "monthly").strip().lower()
+        if period not in ("weekly", "monthly", "yearly"):
+            period = "monthly"
+        next_due = None
+        nd = data.get("next_due_date")
+        if nd and str(nd).lower() not in ("null", "none", ""):
+            try:
+                import datetime as _dt
+                next_due = _dt.date.fromisoformat(str(nd)[:10]).isoformat()
+            except ValueError:
+                next_due = None
+        return {"name": name, "amount": amount, "currency": currency,
+                "period": period, "next_due_date": next_due}
+    except Exception as e:
+        logger.error("parse_payment_text error: %s | raw=%s", e, raw[:200])
+        return {"name": "", "amount": 0.0, "currency": base_currency,
+                "period": "monthly", "next_due_date": None}
+
+
 async def get_savings_tips(monthly_data: list, language: str, currency: str = DEFAULT_CURRENCY) -> str:
     if not monthly_data:
         return ""
