@@ -50,7 +50,7 @@ body{
 
 /* balance card */
 .balance{position:relative;border-radius:20px;padding:20px 20px 18px;background:linear-gradient(120deg,#22C55E 0%,#10B59C 38%,#3B82F6 74%,#7C5CFF 100%);overflow:hidden;margin-bottom:14px;box-shadow:0 16px 34px -14px rgba(34,197,94,.5)}
-.balance::after{content:"";position:absolute;right:-40px;top:-40px;width:160px;height:160px;border-radius:50%;background:rgba(255,255,255,.10)}
+.balance::after{content:"";position:absolute;right:-40px;top:-40px;width:160px;height:160px;border-radius:50%;background:rgba(255,255,255,.10);pointer-events:none}
 .balance .lbl{font-size:13.5px;font-weight:600;color:rgba(255,255,255,.9)}
 .balance .big{font-size:39px;font-weight:800;letter-spacing:-.03em;line-height:1.05;margin-top:8px;color:#fff;position:relative}
 .balance .cur{font-size:13.5px;color:rgba(255,255,255,.85);margin-top:3px;font-weight:600}
@@ -650,9 +650,8 @@ function renderTasks(){
   if(TSTATUS!=="all")list=list.filter(t=>t.status===TSTATUS);
   if(TPRIO!=="all")list=list.filter(t=>t.priority===TPRIO);
   const body=document.getElementById("tkBody");
-  if(!list.length){body.innerHTML=`<div class="emptycard"><div class="empty"><span class="e">✅</span>${TASKS.length?'Ничего не найдено':'Задач пока нет'}<br><button class="cta" data-add="task">＋ Новая задача</button></div></div>`;
-    body.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>openTask());
-    body.innerHTML+=`<div class="note">Задачи хранятся 2 месяца после завершения или отмены, после чего автоматически удаляются.</div>`;return;}
+  if(!list.length){body.innerHTML=`<div class="emptycard"><div class="empty"><span class="e">✅</span>${TASKS.length?'Ничего не найдено':'Задач пока нет'}<br><button class="cta" data-add="task">＋ Новая задача</button></div></div><div class="note">Задачи хранятся 2 месяца после завершения или отмены, после чего автоматически удаляются.</div>`;
+    body.querySelectorAll("[data-add]").forEach(b=>b.onclick=()=>openTask());return;}
   body.innerHTML=list.map(taskCard).join("")+`<div class="note">Задачи хранятся 2 месяца после завершения или отмены, после чего автоматически удаляются.</div>`;
   body.querySelectorAll(".tk").forEach(card=>{
     const id=+card.dataset.id;
@@ -925,9 +924,34 @@ function toggleSub(which){
     box.innerHTML=`<div class="setgrp"><div class="privtext privext">Приложение хранит ваши данные в защищённой базе с построчной изоляцией доступа (RLS). Аутентификация выполняется через подпись Telegram. Вы в любой момент можете выгрузить или удалить свои данные ниже.</div></div>`;
   }
 }
+function _xc(v){
+  if(v==null)v="";
+  const isNum=(typeof v==="number"&&isFinite(v))||(typeof v==="string"&&v!==""&&/^-?\d+(\.\d+)?$/.test(v));
+  const s=String(v).replace(/[\r\n]+/g," ").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+  return `<Cell><Data ss:Type="${isNum?"Number":"String"}">${s}</Data></Cell>`;
+}
+function _xsheet(name,headers,rows){
+  const hd=`<Row>${headers.map(h=>`<Cell><Data ss:Type="String">${h}</Data></Cell>`).join("")}</Row>`;
+  const bd=rows.map(r=>`<Row>${r.map(_xc).join("")}</Row>`).join("");
+  return `<Worksheet ss:Name="${name}"><Table>${hd}${bd}</Table></Worksheet>`;
+}
 async function exportData(){
-  try{const d=await api("/api/export");const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="finances-export.json";a.click();haptic("notif");toast("Данные выгружены");}
-  catch(e){toast("Ошибка экспорта");}
+  try{
+    const d=await api("/api/export");
+    const sheets=[
+      _xsheet("Операции",["Дата","Тип","Категория","Сумма","Заметка","Магазин"],(d.transactions||[]).map(t=>[t.purchase_date,t.type==="income"?"доход":"расход",t.category,t.amount,t.description,t.merchant])),
+      _xsheet("Платежи",["Название","Категория","Сумма","Валюта","Период","След. платёж","Статус"],(d.payments||[]).map(p=>[p.name,p.category,p.amount,p.currency,p.period,p.next_due_date,p.status])),
+      _xsheet("Задачи",["Задача","Статус","Приоритет","Срок","Теги"],(d.tasks||[]).map(t=>[t.title,t.status,t.priority||"",t.due_date||"",(t.tags||[]).join(", ")])),
+      _xsheet("События",["Дата","Время","Событие","Заметка"],(d.events||[]).map(e=>[e.date,e.time||"",e.title,e.note])),
+      _xsheet("Цели",["Цель","Накоплено","Сумма цели","Валюта","Статус"],(d.goals||[]).map(g=>[g.title,g.saved_amount,g.target_amount,g.currency,g.status])),
+      _xsheet("Долги",["Контрагент","Направление","Сумма","Оплачено","Валюта","Статус"],(d.debts||[]).map(x=>[x.counterparty,x.direction,x.amount,x.paid_amount,x.currency,x.status])),
+    ];
+    const xml=`<?xml version="1.0" encoding="UTF-8"?>\n<?mso-application progid="Excel.Sheet"?>\n<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">${sheets.join("")}</Workbook>`;
+    const blob=new Blob(["﻿"+xml],{type:"application/vnd.ms-excel"});
+    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="finances.xls";a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+    haptic("notif");toast("Данные выгружены в Excel");
+  }catch(e){toast("Ошибка экспорта");}
 }
 async function wipeData(){
   if(!confirm("Удалить ВСЕ данные (операции, платежи, события, задачи, цели, долги)? Аккаунт останется."))return;
