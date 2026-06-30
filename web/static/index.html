@@ -461,10 +461,9 @@ function renderOverview(d){
   OVERVIEW=d; CURCODE=d.currency||"UZS";
   document.getElementById("opsChip").textContent="📊 "+(d.month_count||0);
   const balTxt=BAL_HIDDEN?"••••••":num(d.balance,CURCODE);
-  const warn=d.warning?`<button id="balWarn" title="Бюджет превышен">!</button>`:"";
   let html=`
   <div class="balance">
-    <div class="acts">${warn}<button id="balEye">${BAL_HIDDEN?eyeOff():eyeOn()}</button></div>
+    <div class="acts"><button id="balEye">${BAL_HIDDEN?eyeOff():eyeOn()}</button></div>
     <div class="lbl">Баланс</div>
     <div class="big num" id="balBig">${balTxt}</div>
     <div class="cur">${CURCODE}</div>
@@ -482,7 +481,6 @@ function renderOverview(d){
   else html+=`<div class="emptycard"><div class="empty"><span class="e">🔁</span>Регулярных платежей нет</div></div>`;
   const body=document.getElementById("ovBody");body.innerHTML=html;
   document.getElementById("balEye").onclick=()=>{BAL_HIDDEN=!BAL_HIDDEN;document.getElementById("balBig").textContent=BAL_HIDDEN?"••••••":num(d.balance,CURCODE);document.getElementById("balEye").innerHTML=BAL_HIDDEN?eyeOff():eyeOn();haptic("sel");};
-  const bw=document.getElementById("balWarn");if(bw)bw.onclick=()=>toast("Расходы превысили месячный бюджет");
   body.querySelectorAll("[data-go]").forEach(e=>e.onclick=()=>switchTab(e.dataset.go));
   body.querySelectorAll("[data-pay]").forEach(e=>e.onclick=async()=>{const id=e.dataset.pay;switchTab("payments");if(!PAY_LOADED)await loadPayments();const p=PAYMENTS.find(x=>String(x.id)===String(id));if(p)openPayment(p);});
 }
@@ -863,7 +861,7 @@ async function addFolder(){
 }
 
 /* ════════ SETTINGS ════════ */
-const NOTIFY_META=[["budget_alerts","Бюджет 80% и 100%"],["large_tx","Крупные траты"],["weekly_summary","Итоги недели"],["daily_digest","Итоги дня"],["goal_reminders","Напоминания о целях"],["debt_reminders","Напоминания о долгах"],["payment_reminders","Напоминания о платежах"]];
+const NOTIFY_META=[["large_tx","Крупные траты"],["weekly_summary","Итоги недели"],["daily_digest","Итоги дня"],["goal_reminders","Напоминания о целях"],["debt_reminders","Напоминания о долгах"],["payment_reminders","Напоминания о платежах"]];
 function openSettings(){openSheet("setSheet");renderSettings();}
 function renderSettings(){
   const acc=curAccent();

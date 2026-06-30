@@ -104,8 +104,6 @@ def _normalize(result: dict, default_desc: str, base_currency: str = DEFAULT_CUR
 
 async def parse_text_purchase(text: str, user_context: dict) -> dict:
     lang = user_context.get("language", "ru")
-    budget = user_context.get("monthly_budget", 5_000_000)
-    spent = user_context.get("spent_this_month", 0)
     base_currency = normalize_currency(user_context.get("currency"), DEFAULT_CURRENCY)
     base_meta = currency_meta(base_currency)
     cur_word = base_meta["symbol"]
@@ -120,7 +118,6 @@ async def parse_text_purchase(text: str, user_context: dict) -> dict:
             "Если в сообщении явно указана ДРУГАЯ валюта (например $, доллары, евро, €, рубли, ₽, тенге), "
             f"укажи её ISO-код в поле currency (одно из: {codes_str}), а amount — в этой валюте. "
             f"Иначе currency = {base_currency}.\n"
-            f"Контекст: месячный бюджет {budget:.0f}, уже потрачено {spent:.0f} (в {base_currency}).\n"
             f"Категория — строго одна из: {categories_str}.\n"
             "Если в сообщении нет траты или суммы — верни amount = 0.\n"
             "Поле merchant — название магазина/заведения, если упомянуто, иначе null.\n"
@@ -135,7 +132,6 @@ async def parse_text_purchase(text: str, user_context: dict) -> dict:
             "If the message explicitly names ANOTHER currency (e.g. $, dollars, euro, €, rubles, ₽, tenge), "
             f"put its ISO code in the currency field (one of: {codes_str}) and give amount in that currency. "
             f"Otherwise currency = {base_currency}.\n"
-            f"Context: monthly budget {budget:.0f}, already spent {spent:.0f} (in {base_currency}).\n"
             f"Category — strictly one of: {categories_str}.\n"
             "If there is no purchase or amount — return amount = 0.\n"
             "merchant — store/place name if mentioned, otherwise null.\n"

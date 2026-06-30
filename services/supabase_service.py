@@ -60,9 +60,6 @@ async def get_or_create_user(
                         "username": username,
                         "first_name": first_name,
                         "language": os.getenv("DEFAULT_LANGUAGE", "ru"),
-                        "monthly_budget": float(
-                            os.getenv("DEFAULT_MONTHLY_BUDGET", 5_000_000)
-                        ),
                         "currency": os.getenv("DEFAULT_CURRENCY", "UZS"),
                     }
                 )
@@ -83,7 +80,6 @@ async def get_or_create_user(
             "username": username,
             "first_name": first_name,
             "language": "ru",
-            "monthly_budget": 5_000_000,
             "currency": "UZS",
         }
     except Exception as e:
@@ -93,7 +89,6 @@ async def get_or_create_user(
             "username": username,
             "first_name": first_name,
             "language": "ru",
-            "monthly_budget": 5_000_000,
             "currency": "UZS",
         }
 
@@ -174,142 +169,6 @@ async def get_monthly_summary(user_id: int) -> list[dict]:
     return await get_monthly_summary_for(user_id, now_local().strftime("%Y-%m-01"))
 
 
-async def get_daily_spent_last_n(user_id: int, n: int = 7) -> list[float]:
-    """Returns n daily totals ending today (index 0 = oldest, index n-1 = today).
-    Powers the analytics sparkline."""
-    try:
-        today = now_local().date()
-        start = today - timedelta(days=n - 1)
-
-        def _select():
-            return (
-                get_client()
-                .table("transactions")
-                .select("amount, purchase_date")
-                .eq("user_id", user_id)
-                .eq("type", "expense")
-                .gte("purchase_date", start.isoformat())
-                .execute()
-            )
-
-        result = await asyncio.to_thread(_select)
-        buckets = [0.0] * n
-        for row in (result.data if (result and result.data) else []):
-            try:
-                d = date.fromisoformat(str(row["purchase_date"])[:10])
-                idx = (d - start).days
-                if 0 <= idx < n:
-                    buckets[idx] += float(row["amount"])
-            except (ValueError, TypeError, KeyError):
-                continue
-        return buckets
-    except Exception as e:
-        logger.error("get_daily_spent_last_n error user_id=%s: %s", user_id, e)
-        return [0.0] * n
-
-
-async def get_month_spent_through_day(user_id: int, year: int, month: int, day: int) -> float:
-    """Sum of spending in {year}-{month} from day 1 through `day` (inclusive).
-    Used for the same-day-of-month month-over-month comparison."""
-    try:
-        first = date(year, month, 1)
-        try:
-            last = date(year, month, day)
-        except ValueError:
-            # day out of range for that month (e.g. 31 in Feb) → clamp to month end
-            import calendar
-            last = date(year, month, calendar.monthrange(year, month)[1])
-
-        def _select():
-            return (
-                get_client()
-                .table("transactions")
-                .select("amount")
-                .eq("user_id", user_id)
-                .eq("type", "expense")
-                .gte("purchase_date", first.isoformat())
-                .lte("purchase_date", last.isoformat())
-                .execute()
-            )
-
-        result = await asyncio.to_thread(_select)
-        return sum(
-            float(row["amount"]) for row in (result.data if (result and result.data) else [])
-        )
-    except Exception as e:
-        logger.error("get_month_spent_through_day error user_id=%s: %s", user_id, e)
-        return 0.0
-
-
-def make_budget_status(budget: float, spent: float) -> dict:
-    """Pure helper — build a budget-status dict without touching the DB."""
-    budget = float(budget or 0)
-    spent = float(spent or 0)
-    remaining = max(0.0, budget - spent)
-    percent = (spent / budget * 100) if budget > 0 else 0.0
-    return {
-        "spent": spent,
-        "budget": budget,
-        "remaining": remaining,
-        "percent": percent,
-        "warning": percent >= 80,
-    }
-
-
-async def get_month_spent(user_id: int) -> float:
-    """Single query: total spent this month."""
-    try:
-        current_month = now_local().strftime("%Y-%m-01")
-
-        def _get_summary():
-            return (
-                get_client()
-                .table("monthly_summary")
-                .select("total_spent")
-                .eq("user_id", user_id)
-                .eq("month", current_month)
-                .execute()
-            )
-
-        result = await asyncio.to_thread(_get_summary)
-        return sum(
-            float(row["total_spent"])
-            for row in (result.data if (result and result.data) else [])
-        )
-    except Exception as e:
-        logger.error("get_month_spent error user_id=%s: %s", user_id, e)
-        return 0.0
-
-
-async def get_budget_status(user_id: int, budget: float | None = None) -> dict:
-    """Budget status. Pass `budget` (already known from the user row) to skip the
-    users lookup and do a single DB round-trip instead of two."""
-    try:
-        if budget is None:
-            def _get_user():
-                return (
-                    get_client()
-                    .table("users")
-                    .select("monthly_budget")
-                    .eq("telegram_id", user_id)
-                    .execute()
-                )
-
-            user_result = await asyncio.to_thread(_get_user)
-            rows = user_result.data if (user_result and user_result.data) else []
-            budget = float(
-                rows[0].get("monthly_budget", os.getenv("DEFAULT_MONTHLY_BUDGET", 5_000_000))
-                if rows
-                else os.getenv("DEFAULT_MONTHLY_BUDGET", 5_000_000)
-            )
-
-        spent = await get_month_spent(user_id)
-        return make_budget_status(budget, spent)
-    except Exception as e:
-        logger.error("get_budget_status error user_id=%s: %s", user_id, e)
-        return make_budget_status(5_000_000, 0)
-
-
 async def get_last_transactions(user_id: int, limit: int = 10) -> list[dict]:
     try:
         def _select():
@@ -379,22 +238,6 @@ async def get_user(user_id: int) -> dict:
         return {}
 
 
-async def update_budget(user_id: int, amount: float) -> None:
-    try:
-        def _update():
-            return (
-                get_client()
-                .table("users")
-                .update({"monthly_budget": amount})
-                .eq("telegram_id", user_id)
-                .execute()
-            )
-
-        await asyncio.to_thread(_update)
-    except Exception as e:
-        logger.error("update_budget error user_id=%s: %s", user_id, e)
-
-
 async def update_language(user_id: int, language: str) -> None:
     try:
         def _update():
@@ -432,7 +275,6 @@ async def update_currency(user_id: int, currency: str) -> None:
 
 # Sensible defaults: alerts that matter are on; the chatty daily digest is off.
 DEFAULT_NOTIFY = {
-    "budget_alerts": True,    # 80% / 100% budget thresholds (real-time)
     "large_tx": True,         # unusually large single purchase
     "daily_digest": False,    # evening recap of the day
     "weekly_summary": True,   # Sunday week recap
@@ -501,7 +343,7 @@ async def mark_notif_sent(user_id: int, ntype: str, dedup_key: str) -> bool:
 
 async def get_transactions_in_range(user_id: int, start_iso: str, end_iso: str) -> list[dict]:
     """All EXPENSE transactions with purchase_date in [start_iso, end_iso] (inclusive).
-    Spend-only — powers digests/analytics, so income is excluded."""
+    Spend-only — powers digests/reports, so income is excluded."""
     try:
         def _select():
             return (
@@ -941,33 +783,6 @@ async def delete_all_transactions(user_id: int) -> int:
 
 # ───────────────────────── Balance & period reports ─────────────────────────
 
-async def get_balance(user_id: int) -> dict:
-    """All-time wallet balance = sum(income) − sum(expense) in the base currency.
-    Returns {income, expense, balance}."""
-    try:
-        def _select():
-            return (
-                get_client()
-                .table("transactions")
-                .select("amount, type")
-                .eq("user_id", user_id)
-                .execute()
-            )
-
-        result = await asyncio.to_thread(_select)
-        income = expense = 0.0
-        for row in (result.data if (result and result.data) else []):
-            amt = float(row.get("amount") or 0)
-            if row.get("type") == "income":
-                income += amt
-            else:
-                expense += amt
-        return {"income": income, "expense": expense, "balance": income - expense}
-    except Exception as e:
-        logger.error("get_balance error user_id=%s: %s", user_id, e)
-        return {"income": 0.0, "expense": 0.0, "balance": 0.0}
-
-
 async def get_period_report(user_id: int, start_iso: str, end_iso: str) -> dict:
     """Income/expense/balance + the operation rows for [start_iso, end_iso] (inclusive),
     newest first. Powers the Mini App Reports (Отчёты) screen."""
@@ -1001,17 +816,22 @@ async def get_period_report(user_id: int, start_iso: str, end_iso: str) -> dict:
         return {"income": 0.0, "expense": 0.0, "balance": 0.0, "count": 0, "transactions": []}
 
 
-async def get_month_report_data(user_id: int, base_currency: str) -> dict:
-    """Aggregate the current month for the bot's monthly overview: running balance,
+async def get_month_report_data(user_id: int, base_currency: str, year: int | None = None, month: int | None = None) -> dict:
+    """Aggregate a month for the bot's monthly overview: net (income − expense),
     income/expense, avg per day, top expense category, tasks done, events passed,
-    services paid this month, and the active monthly services cost (base currency)."""
+    services paid this month, and the active monthly services cost (base currency).
+    Defaults to the current month; pass year/month for a past month."""
+    import calendar as _cal
     now = now_local()
-    today = now.date()
-    month_first = f"{now.year:04d}-{now.month:02d}-01"
+    y = year or now.year
+    m = month or now.month
+    is_current = (y == now.year and m == now.month)
+    last_day = _cal.monthrange(y, m)[1]
+    month_first = f"{y:04d}-{m:02d}-01"
     month_prefix = month_first[:7]
-    bal, report, payments, tasks, events = await asyncio.gather(
-        get_balance(user_id),
-        get_period_report(user_id, month_first, today.isoformat()),
+    end = now.date() if is_current else date(y, m, last_day)
+    report, payments, tasks, events = await asyncio.gather(
+        get_period_report(user_id, month_first, end.isoformat()),
         get_payments(user_id),
         get_tasks(user_id),
         get_events_for_month(user_id, month_first),
@@ -1023,11 +843,8 @@ async def get_month_report_data(user_id: int, base_currency: str) -> dict:
         c = r.get("category", "Другое")
         cats[c] = cats.get(c, 0.0) + float(r.get("amount") or 0)
     top_category = max(cats, key=cats.get) if cats else None
-    tasks_done = sum(
-        1 for t in tasks
-        if t.get("status") == "done" and str(t.get("completed_at") or "")[:7] == month_prefix
-    )
-    events_done = sum(1 for e in events if str(e.get("event_date") or "")[:10] <= today.isoformat())
+    tasks_done = sum(1 for t in tasks if t.get("status") == "done" and str(t.get("completed_at") or "")[:7] == month_prefix)
+    events_done = sum(1 for e in events if str(e.get("event_date") or "")[:10] <= end.isoformat())
     services_paid = sum(1 for p in payments if str(p.get("last_paid_date") or "")[:7] == month_prefix)
     mult = {"weekly": 52 / 12, "monthly": 1.0, "yearly": 1 / 12}
     services_monthly = 0.0
@@ -1036,17 +853,24 @@ async def get_month_report_data(user_id: int, base_currency: str) -> dict:
             continue
         amt = await convert(float(p.get("amount") or 0), normalize_currency(p.get("currency"), base_currency), base_currency)
         services_monthly += amt * mult.get(p.get("period", "monthly"), 1.0)
+    days = end.day if is_current else last_day
+    # For a past month, payments/tasks are not month-scoped, so judge emptiness on
+    # month-scoped signals only; the current month keeps its broader definition.
+    if is_current:
+        has_activity = bool(report["income"] or report["expense"] or payments or tasks or events)
+    else:
+        has_activity = bool(report["income"] or report["expense"] or events or tasks_done or services_paid)
     return {
-        "balance": bal["balance"],
+        "balance": report["balance"],   # net for the month = income − expense
         "income": report["income"],
         "expense": report["expense"],
-        "avg_day": report["expense"] / (today.day or 1),
+        "avg_day": report["expense"] / (days or 1),
         "top_category": top_category,
         "tasks_done": tasks_done,
         "events_done": events_done,
         "services_paid": services_paid,
         "services_monthly": services_monthly,
-        "has_activity": bool(report["income"] or report["expense"] or payments or tasks or events),
+        "has_activity": has_activity,
     }
 
 

@@ -8,7 +8,6 @@ from apscheduler.triggers.cron import CronTrigger
 from services.currency_service import DEFAULT_CURRENCY, normalize_currency
 from services.supabase_service import (
     get_all_users,
-    get_budget_status,
     get_debts,
     get_goals,
     get_month_report_data,
@@ -53,6 +52,7 @@ def setup_scheduler(application) -> AsyncIOScheduler:
     async def send_monthly_reports():
         logger.info("scheduler: monthly reports")
         users = await get_all_users()
+        mkey = f"monthly:{now_local().strftime('%Y-%m')}"
         for user in users:
             try:
                 tid = user["telegram_id"]
@@ -60,6 +60,8 @@ def setup_scheduler(application) -> AsyncIOScheduler:
                 cur = normalize_currency(user.get("currency"), DEFAULT_CURRENCY)
                 data = await get_month_report_data(tid, cur)
                 if not data.get("has_activity"):
+                    continue
+                if not await mark_notif_sent(tid, "monthly", mkey):
                     continue
                 await _send(tid, format_month_overview(data, lang, currency=cur))
                 logger.info("monthly report sent to %s", tid)
@@ -90,8 +92,7 @@ def setup_scheduler(application) -> AsyncIOScheduler:
                     agg = _category_totals(rows)
                     cat = max(agg, key=agg.get)
                     top = {"category": cat, "amount": agg[cat]}
-                status = await get_budget_status(tid, budget=float(user.get("monthly_budget") or 5_000_000))
-                await _send(tid, format_daily_digest(total, n, top, status, lang, currency=cur))
+                await _send(tid, format_daily_digest(total, n, top, lang, currency=cur))
             except Exception as e:
                 logger.warning("daily digest failed %s: %s", user.get("telegram_id"), e)
 
@@ -230,11 +231,5 @@ def setup_scheduler(application) -> AsyncIOScheduler:
         trigger=CronTrigger(hour=10, minute=0),
         id="debt_reminders", replace_existing=True,
     )
-    scheduler.add_job(
-        send_goal_pulse, args=["evening"],
-        trigger=CronTrigger(hour=21, minute=0),
-        id="goal_pulse_evening", replace_existing=True,
-    )
-
     logger.info("Scheduler configured (timezone: Asia/Tashkent)")
     return scheduler

@@ -33,7 +33,6 @@ MENU = {
     "ru": {
         "history": "📋 История",
         "goals": "🎯 Цели",
-        "budget": "💰 Бюджет",
         "tips": "💡 Советы",
         "undo": "↩️ Отменить",
         "more": "⚙️ Ещё",
@@ -41,7 +40,6 @@ MENU = {
     "en": {
         "history": "📋 History",
         "goals": "🎯 Goals",
-        "budget": "💰 Budget",
         "tips": "💡 Tips",
         "undo": "↩️ Undo",
         "more": "⚙️ More",
@@ -53,8 +51,7 @@ def main_menu_keyboard(lang: str = "ru") -> ReplyKeyboardMarkup:
     m = MENU.get(lang, MENU["ru"])
     rows = [
         [KeyboardButton(m["history"]), KeyboardButton(m["goals"])],
-        [KeyboardButton(m["budget"]), KeyboardButton(m["tips"])],
-        [KeyboardButton(m["more"])],
+        [KeyboardButton(m["tips"]), KeyboardButton(m["more"])],
     ]
     placeholder = "Напиши трату или выбери действие…" if lang == "ru" else "Type a purchase or pick an action…"
     return ReplyKeyboardMarkup(
@@ -80,29 +77,6 @@ def saved_card_keyboard(tx_id, lang: str = "ru") -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([row])
 
 
-def analytics_keyboard(lang: str = "ru", offset: int = 0) -> InlineKeyboardMarkup:
-    if lang == "ru":
-        report, tips, refresh = "📈 Отчёт", "💡 Советы", "🔄 Обновить"
-        prev_lbl, cur_lbl = "🗓 Прошлый месяц", "📊 Текущий месяц"
-    else:
-        report, tips, refresh = "📈 Report", "💡 Tips", "🔄 Refresh"
-        prev_lbl, cur_lbl = "🗓 Last month", "📊 Current month"
-
-    # Month-nav button flips between "previous" and "back to current"
-    if offset < 0:
-        month_btn = InlineKeyboardButton(cur_lbl, callback_data="ana:0")
-    else:
-        month_btn = InlineKeyboardButton(prev_lbl, callback_data=f"ana:{offset - 1}")
-
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton(report, callback_data="nav:report"),
-             InlineKeyboardButton(tips, callback_data="nav:tips")],
-            [month_btn, InlineKeyboardButton(refresh, callback_data=f"ana:{offset}")],
-        ]
-    )
-
-
 def report_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
     prev = "🗓 Прошлый месяц" if lang == "ru" else "🗓 Last month"
     return InlineKeyboardMarkup([[InlineKeyboardButton(prev, callback_data="rep:prev")]])
@@ -125,18 +99,6 @@ def history_delete_keyboard(transactions: list, lang: str) -> InlineKeyboardMark
     refresh = "🔄 Обновить" if lang == "ru" else "🔄 Refresh"
     rows.append([InlineKeyboardButton(refresh, callback_data="hist:refresh")])
     return InlineKeyboardMarkup(rows)
-
-
-def budget_presets_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
-    custom = "✏️ Своя сумма" if lang == "ru" else "✏️ Custom"
-    return InlineKeyboardMarkup(
-        [
-            [InlineKeyboardButton("3 млн", callback_data="bud:3000000"),
-             InlineKeyboardButton("5 млн", callback_data="bud:5000000"),
-             InlineKeyboardButton("8 млн", callback_data="bud:8000000")],
-            [InlineKeyboardButton(custom, callback_data="bud:custom")],
-        ]
-    )
 
 
 def more_menu_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
@@ -229,10 +191,9 @@ def currency_keyboard(current: str = "UZS", lang: str = "ru") -> InlineKeyboardM
 # ───────────────────────── Notification settings ─────────────────────────
 
 # Display order + labels for the toggle list. Keys match DEFAULT_NOTIFY.
-NOTIFY_ORDER = ["budget_alerts", "large_tx", "weekly_summary", "daily_digest", "goal_reminders", "debt_reminders", "payment_reminders"]
+NOTIFY_ORDER = ["large_tx", "weekly_summary", "daily_digest", "goal_reminders", "debt_reminders", "payment_reminders"]
 NOTIFY_LABELS = {
     "ru": {
-        "budget_alerts": "Бюджет: 80% и 100%",
         "large_tx": "Крупные траты",
         "weekly_summary": "Итоги недели",
         "daily_digest": "Итоги дня",
@@ -241,7 +202,6 @@ NOTIFY_LABELS = {
         "payment_reminders": "Напоминания о платежах",
     },
     "en": {
-        "budget_alerts": "Budget: 80% & 100%",
         "large_tx": "Large purchases",
         "weekly_summary": "Weekly summary",
         "daily_digest": "Daily wrap-up",

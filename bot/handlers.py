@@ -18,8 +18,6 @@ from telegram.ext import (
 )
 
 from bot.keyboards import (
-    analytics_keyboard,
-    budget_presets_keyboard,
     currency_keyboard,
     debts_keyboard,
     goal_delete_confirm_keyboard,
@@ -59,23 +57,16 @@ from services.supabase_service import (
     delete_goal,
     delete_last_transaction,
     delete_transaction,
-    get_budget_status,
-    get_daily_spent_last_n,
     get_debts,
     get_goal,
     get_goals,
     get_last_transactions,
-    get_month_spent_through_day,
     get_monthly_summary,
     get_month_report_data,
-    get_monthly_summary_for,
     get_or_create_user,
-    make_budget_status,
-    mark_notif_sent,
     notify_settings_of,
     now_local,
     save_transaction,
-    update_budget,
     update_currency,
     update_goal,
     update_language,
@@ -83,11 +74,8 @@ from services.supabase_service import (
 )
 from utils.formatters import (
     CATEGORY_EMOJI,
-    compute_analytics,
     count_label,
     format_amount,
-    format_analytics_card,
-    format_budget_alert,
     format_debt_created,
     format_debts_list,
     format_goal_card,
@@ -95,7 +83,6 @@ from utils.formatters import (
     format_history,
     format_large_tx_alert,
     format_month_overview,
-    format_monthly_report,
     format_saved_card,
     format_tips,
     goal_progress,
@@ -117,10 +104,6 @@ async def _typing(update: Update, action: ChatAction = ChatAction.TYPING) -> Non
         await update.effective_chat.send_action(action)
     except Exception:
         pass
-
-
-def _budget_of(user: dict) -> float:
-    return float(user.get("monthly_budget", 5_000_000) or 5_000_000)
 
 
 def _currency_of(user: dict) -> str:
@@ -207,10 +190,9 @@ def _parse_goal_structured(text: str):
 
 
 async def _build_context(user: dict, user_id: int, summary: list | None = None):
-    """Returns (user_context, budget, prior_spent, currency, prior_avg).
+    """Returns (user_context, currency, prior_avg).
     Pass `summary` if already fetched (e.g. concurrently with the user row) to
     skip the monthly-summary query."""
-    budget = _budget_of(user)
     currency = _currency_of(user)
     if summary is None:
         summary = await get_monthly_summary(user_id)
@@ -219,11 +201,9 @@ async def _build_context(user: dict, user_id: int, summary: list | None = None):
     avg = spent / count if count else 0.0
     user_context = {
         "language": user.get("language", "ru"),
-        "monthly_budget": budget,
-        "spent_this_month": spent,
         "currency": currency,
     }
-    return user_context, budget, spent, currency, avg
+    return user_context, currency, avg
 
 
 async def _save_and_reply(
@@ -233,8 +213,6 @@ async def _save_and_reply(
     lang: str,
     user_id: int,
     input_type: str,
-    budget: float,
-    prior_spent: float,
     currency: str,
     user: dict,
     prior_avg: float = 0.0,
@@ -258,7 +236,7 @@ async def _save_and_reply(
         original_currency = entry_currency
         fx_note = f"{format_amount(entry_amount, entry_currency)} → {format_amount(base_amount, currency)}"
 
-    result["amount"] = base_amount  # card + budget math use the base amount
+    result["amount"] = base_amount  # the card uses the base amount
 
     saved = await save_transaction(
         user_id,
@@ -273,50 +251,25 @@ async def _save_and_reply(
     )
     tx_id = saved.get("id") if saved else None
 
-    spent_after = prior_spent + base_amount
-    status = make_budget_status(budget, spent_after)
-    card = format_saved_card(result, status, lang, input_type, currency=currency, fx_note=fx_note)
+    card = format_saved_card(result, lang, input_type, currency=currency, fx_note=fx_note)
     await update.message.reply_text(
         card, parse_mode="HTML", reply_markup=saved_card_keyboard(tx_id, lang)
     )
 
-    # Smart notifications (budget thresholds + large purchase).
+    # Smart notification: only the large-purchase nudge (budget model removed).
     await _send_alerts(
         context, update.effective_chat.id, user_id, lang, currency,
-        budget, prior_spent, spent_after, base_amount,
-        result.get("category", ""), prior_avg, user,
+        base_amount, result.get("category", ""), prior_avg, user,
     )
 
 
 async def _send_alerts(
     context, chat_id, user_id, lang, currency,
-    budget, prior_spent, spent_after, base_amount, category, prior_avg, user,
+    base_amount, category, prior_avg, user,
 ):
-    """Fire real-time alerts after a save, honouring the user's notify toggles
+    """Fire the large-purchase alert after a save, honouring the user's notify toggle
     (reusing the user row already loaded by the handler — no extra DB round-trip)."""
     settings = notify_settings_of(user)
-
-    month_key = now_local().strftime("%Y-%m")
-
-    # Budget threshold crossings (deduped once per month per threshold).
-    if settings.get("budget_alerts") and budget > 0:
-        prior_pct = prior_spent / budget * 100
-        new_pct = spent_after / budget * 100
-        crossing = None
-        if new_pct >= 100 > prior_pct:
-            crossing = f"budget_100:{month_key}"
-        elif new_pct >= 80 > prior_pct:
-            crossing = f"budget_80:{month_key}"
-        if crossing and await mark_notif_sent(user_id, "budget", crossing):
-            status = make_budget_status(budget, spent_after)
-            try:
-                await context.bot.send_message(
-                    chat_id=chat_id,
-                    text=format_budget_alert(status, lang, currency=currency),
-                    parse_mode="HTML",
-                )
-            except Exception as e:
-                logger.warning("budget alert failed user=%s: %s", user_id, e)
 
     # Large single purchase: ≥3× the running average, with enough prior history.
     if settings.get("large_tx") and prior_avg > 0 and base_amount >= 3 * prior_avg:
@@ -328,42 +281,6 @@ async def _send_alerts(
             )
         except Exception as e:
             logger.warning("large-tx alert failed user=%s: %s", user_id, e)
-
-
-async def _analytics_payload(user_id: int, budget: float, lang: str, currency: str, offset: int = 0):
-    """Build (text, keyboard) for the analytics card. offset=0 current month, -1 prev, etc."""
-    now = now_local()
-    year, month = now.year, now.month
-    for _ in range(-offset):
-        month -= 1
-        if month == 0:
-            month = 12
-            year -= 1
-    is_current = offset == 0
-    month_first = f"{year}-{month:02d}-01"
-
-    sparkline = None
-    prev_through = None
-    if is_current:
-        ref = now
-        pm = month - 1 or 12
-        py = year if month > 1 else year - 1
-        # Three independent reads — run them concurrently.
-        summary, sparkline, prev_through = await asyncio.gather(
-            get_monthly_summary_for(user_id, month_first),
-            get_daily_spent_last_n(user_id, 7),
-            get_month_spent_through_day(user_id, py, pm, now.day),
-        )
-    else:
-        ref = datetime(year, month, 1)
-        summary = await get_monthly_summary_for(user_id, month_first)
-
-    a = compute_analytics(
-        summary, budget, ref,
-        sparkline=sparkline, prev_through_day=prev_through, is_current=is_current,
-    )
-    text = format_analytics_card(a, lang, currency=currency)
-    return text, analytics_keyboard(lang, offset)
 
 
 async def _goals_payload(user_id: int, lang: str):
@@ -438,57 +355,6 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(t("error_generic", "ru"))
 
 
-async def budget_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    try:
-        user = await _get_user(update)
-        lang = user.get("language", "ru")
-        user_id = update.effective_user.id
-        currency = _currency_of(user)
-        logger.info("budget telegram_id=%s args=%s", user_id, context.args)
-
-        if not context.args:
-            await budget_view_handler(update, context, user=user)
-            return
-
-        raw = "".join(context.args).replace(" ", "").replace(",", "")
-        try:
-            amount = float(raw)
-            if amount <= 0:
-                raise ValueError
-        except ValueError:
-            await update.message.reply_text(t("budget_invalid", lang), parse_mode="HTML")
-            return
-
-        await update_budget(user_id, amount)
-        await update.message.reply_text(
-            t("budget_set", lang, amount=format_amount(amount, currency)), parse_mode="HTML"
-        )
-    except Exception as e:
-        logger.error("budget_handler error: %s", e)
-        await update.message.reply_text(t("error_generic", "ru"))
-
-
-async def budget_view_handler(update: Update, context: ContextTypes.DEFAULT_TYPE, user: dict = None) -> None:
-    """Show current budget gauge + preset quick-set buttons."""
-    try:
-        user = user or await _get_user(update)
-        lang = user.get("language", "ru")
-        user_id = update.effective_user.id
-        budget = _budget_of(user)
-        currency = _currency_of(user)
-        status = await get_budget_status(user_id, budget=budget)
-        from utils.formatters import zone_dot
-        pct = status["percent"]
-        await update.message.reply_text(
-            t("budget_view", lang, amount=format_amount(budget, currency), gauge=f"{zone_dot(pct)} {pct:.1f}%"),
-            parse_mode="HTML",
-            reply_markup=budget_presets_keyboard(lang),
-        )
-    except Exception as e:
-        logger.error("budget_view_handler error: %s", e)
-        await update.message.reply_text(t("error_generic", "ru"))
-
-
 async def report_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         user = await _get_user(update)
@@ -509,21 +375,6 @@ async def report_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         )
     except Exception as e:
         logger.error("report_handler error: %s", e)
-        await update.message.reply_text(t("error_generic", "ru"))
-
-
-async def analytics_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    try:
-        user = await _get_user(update)
-        lang = user.get("language", "ru")
-        user_id = update.effective_user.id
-        logger.info("analytics telegram_id=%s", user_id)
-
-        await _typing(update)
-        text, kb = await _analytics_payload(user_id, _budget_of(user), lang, _currency_of(user), offset=0)
-        await update.message.reply_text(text, parse_mode="HTML", reply_markup=kb)
-    except Exception as e:
-        logger.error("analytics_handler error: %s", e)
         await update.message.reply_text(t("error_generic", "ru"))
 
 
@@ -877,7 +728,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         user = await _get_user(update)
         lang = user.get("language", "ru")
         user_id = update.effective_user.id
-        budget = _budget_of(user)
         currency = _currency_of(user)
         data = query.data or ""
         logger.info("callback telegram_id=%s data=%s", user_id, data)
@@ -969,24 +819,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                              reply_markup=history_delete_keyboard(transactions, lang))
             return
 
-        # ── Analytics: refresh / month navigation (edit in place) ──
-        if data.startswith("ana:"):
-            try:
-                offset = int(data.split(":", 1)[1])
-            except ValueError:
-                offset = 0
-            await query.answer()
-            text, kb = await _analytics_payload(user_id, budget, lang, currency, offset=offset)
-            await _safe_edit(query, text, parse_mode="HTML", reply_markup=kb)
-            return
-
-        # ── Analytics: open as a NEW message (from saved card / report / history) ──
-        if data == "nav:analytics":
-            await query.answer()
-            text, kb = await _analytics_payload(user_id, budget, lang, currency, offset=0)
-            await query.message.reply_text(text, parse_mode="HTML", reply_markup=kb)
-            return
-
         # ── Open report (new message) ──
         if data == "nav:report":
             await query.answer()
@@ -1006,53 +838,16 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             now = now_local()
             pm = now.month - 1 or 12
             py = now.year if now.month > 1 else now.year - 1
-            month_first = f"{py}-{pm:02d}-01"
-            summary = await get_monthly_summary_for(user_id, month_first)
             from utils.formatters import _month_name_for
             label = _month_name_for(py, pm, lang)
-            if not summary:
+            rep = await get_month_report_data(user_id, currency, year=py, month=pm)
+            if not rep.get("has_activity"):
                 await query.message.reply_text(t("empty_report", lang), parse_mode="HTML")
                 return
-            spent = sum(float(r.get("total_spent", 0)) for r in summary)
-            status = make_budget_status(budget, spent)
             await query.message.reply_text(
-                format_monthly_report(summary, status, lang, month_label=label, currency=currency),
+                format_month_overview(rep, lang, currency=currency, month_label=label),
                 parse_mode="HTML",
                 reply_markup=prev_report_keyboard(lang),
-            )
-            return
-
-        # ── Tips (new message, LLM) ──
-        if data == "nav:tips":
-            await query.answer()
-            summary = await get_monthly_summary(user_id)
-            if not summary:
-                await query.message.reply_text(t("no_data_tips", lang), parse_mode="HTML")
-                return
-            await query.message.reply_text(t("tips_loading", lang), parse_mode="HTML")
-            await _typing(update)
-            tips = await get_savings_tips(summary, lang, currency)
-            await query.message.reply_text(
-                format_tips(tips, lang) if tips else t("no_data_tips", lang), parse_mode="HTML"
-            )
-            return
-
-        # ── Budget presets ──
-        if data.startswith("bud:"):
-            val = data.split(":", 1)[1]
-            if val == "custom":
-                await query.answer()
-                await query.message.reply_text(t("budget_custom_prompt", lang), parse_mode="HTML")
-                return
-            try:
-                amount = float(val)
-            except ValueError:
-                await query.answer()
-                return
-            await update_budget(user_id, amount)
-            await query.answer("✅")
-            await _safe_edit(
-                query, t("budget_set", lang, amount=format_amount(amount, currency)), parse_mode="HTML"
             )
             return
 
@@ -1226,7 +1021,6 @@ async def _goal_callback(update, context, query, user_id, lang, data):
 BUTTON_ROUTES = {
     "📋 История": "history", "📋 History": "history",
     "🎯 Цели": "goals", "🎯 Goals": "goals",
-    "💰 Бюджет": "budget_view", "💰 Budget": "budget_view",
     "💡 Советы": "tips", "💡 Tips": "tips",
     "↩️ Отменить": "undo", "↩️ Undo": "undo",
     "⚙️ Ещё": "more", "⚙️ More": "more",
@@ -1262,9 +1056,9 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         # User row and month summary are independent — fetch them concurrently.
         user, summary = await asyncio.gather(_get_user(update), get_monthly_summary(user_id))
         lang = user.get("language", "ru")
-        user_context, budget, prior_spent, currency, prior_avg = await _build_context(user, user_id, summary)
+        user_context, currency, prior_avg = await _build_context(user, user_id, summary)
         result = await parse_text_purchase(label, user_context)
-        await _save_and_reply(update, context, result, lang, user_id, "text", budget, prior_spent, currency, user, prior_avg)
+        await _save_and_reply(update, context, result, lang, user_id, "text", currency, user, prior_avg)
     except Exception as e:
         logger.error("text_handler error: %s", e)
         await update.message.reply_text(t("error_generic", "ru"))
@@ -1296,9 +1090,9 @@ async def voice_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             if await _handle_pending_text(update, context, pend, transcribed):
                 return
         await _typing(update)
-        user_context, budget, prior_spent, currency, prior_avg = await _build_context(user, user_id)
+        user_context, currency, prior_avg = await _build_context(user, user_id)
         result = await parse_text_purchase(transcribed, user_context)
-        await _save_and_reply(update, context, result, lang, user_id, "voice", budget, prior_spent, currency, user, prior_avg)
+        await _save_and_reply(update, context, result, lang, user_id, "voice", currency, user, prior_avg)
     except Exception as e:
         logger.error("voice_handler error: %s", e)
         await update.message.reply_text(t("error_generic", "ru"))
@@ -1334,9 +1128,9 @@ async def audio_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             if await _handle_pending_text(update, context, pend, transcribed):
                 return
         await _typing(update)
-        user_context, budget, prior_spent, currency, prior_avg = await _build_context(user, user_id)
+        user_context, currency, prior_avg = await _build_context(user, user_id)
         result = await parse_text_purchase(transcribed, user_context)
-        await _save_and_reply(update, context, result, lang, user_id, "audio", budget, prior_spent, currency, user, prior_avg)
+        await _save_and_reply(update, context, result, lang, user_id, "audio", currency, user, prior_avg)
     except Exception as e:
         logger.error("audio_handler error: %s", e)
         await update.message.reply_text(t("error_generic", "ru"))
@@ -1356,9 +1150,9 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         file = await context.bot.get_file(photo.file_id)
         image_bytes = bytes(await file.download_as_bytearray())
 
-        user_context, budget, prior_spent, currency, prior_avg = await _build_context(user, user_id)
+        user_context, currency, prior_avg = await _build_context(user, user_id)
         result = await parse_photo_receipt(image_bytes, user_context)
-        await _save_and_reply(update, context, result, lang, user_id, "photo", budget, prior_spent, currency, user, prior_avg)
+        await _save_and_reply(update, context, result, lang, user_id, "photo", currency, user, prior_avg)
     except Exception as e:
         logger.error("photo_handler error: %s", e)
         await update.message.reply_text(t("error_generic", "ru"))
@@ -1368,7 +1162,6 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 _ROUTE_FUNCS.update({
     "history": history_handler,
     "goals": goals_handler,
-    "budget_view": budget_view_handler,
     "tips": tips_handler,
     "undo": undo_handler,
     "more": more_handler,
@@ -1379,7 +1172,6 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("start", start_handler))
     application.add_handler(CommandHandler("app", app_handler))
     application.add_handler(CommandHandler("help", help_handler))
-    application.add_handler(CommandHandler("budget", budget_handler))
     application.add_handler(CommandHandler("goals", goals_handler))
     application.add_handler(CommandHandler("debts", debts_handler))
     application.add_handler(CommandHandler("currency", currency_handler))

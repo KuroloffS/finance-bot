@@ -2,8 +2,8 @@
 
 Design
 ------
-Every user has a single *base* currency (stored on `users.currency`). All budget
-and analytics math is done in that base currency, so a transaction entered in a
+Every user has a single *base* currency (stored on `users.currency`). All money
+math is done in that base currency, so a transaction entered in a
 foreign currency is converted to the base at save time and the base amount is
 what lands in `transactions.amount` (the `monthly_summary` view keeps working
 unchanged). The original amount/currency are stored alongside for transparency.

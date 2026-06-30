@@ -17,7 +17,6 @@ TEXTS = {
             "🎧 <b>Аудио:</b> пришли аудиофайл\n"
             "💱 Можно в любой валюте: «такси 12 долларов» — переведу сам.\n\n"
             "<b>Команды</b>\n"
-            "💰 /budget [сумма] — установить бюджет\n"
             "🎯 /goals — цели накопления\n"
             "📊 /report — отчёт за месяц\n"
             "📋 /history — последние 10 трат\n"
@@ -28,8 +27,6 @@ TEXTS = {
             "🗑 /reset — удалить все траты\n"
             "🌐 /lang ru|en — сменить язык"
         ),
-        "budget_set": "✅ <b>Бюджет обновлён</b>\n💰 {amount} в месяц",
-        "budget_invalid": "❌ Укажи сумму числом.\nНапример: <code>/budget 5000000</code>",
         "voice_transcribed": "🎤 <i>Распознал:</i> «{text}»",
         "photo_processing": "📸 Изучаю чек…",
         "audio_processing": "🎧 Слушаю аудио…",
@@ -60,14 +57,6 @@ TEXTS = {
         "menu_hint": "Готово! Пользуйся кнопками внизу 👇",
         "open_app_hint": "📱 <b>Финансовое приложение</b>\nКрасивая аналитика, графики и быстрое добавление трат — всё в одном экране.",
         "app_unavailable": "📱 Приложение ещё не настроено (нужен публичный адрес). Пользуйся кнопками меню.",
-        "budget_view": (
-            "💰 <b>Месячный бюджет</b>\n"
-            "━━━━━━━━━━━━━━━━━━━\n\n"
-            "Текущий: <b>{amount}</b>\n"
-            "{gauge}\n\n"
-            "Выбери новый или нажми «Своя сумма»:"
-        ),
-        "budget_custom_prompt": "✏️ Введи сумму бюджета числом.\nНапример: <code>/budget 6000000</code>",
         "more_menu": "⚙️ <b>Ещё</b>\n━━━━━━━━━━━━━━━━━━━\n\nВыбери действие:",
         # ── Savings goals ──
         "goals_hint": "Нажми на цель, чтобы пополнить или изменить",
@@ -113,7 +102,7 @@ TEXTS = {
         "currency_prompt": (
             "💱 <b>Валюта</b>\n━━━━━━━━━━━━━━━━━━━\n\n"
             "Текущая: <b>{currency}</b>\n"
-            "Выбери основную валюту — в ней считаются бюджет и аналитика:"
+            "Выбери основную валюту:"
         ),
         "currency_changed": (
             "✅ Основная валюта: <b>{currency}</b>\n"
@@ -145,7 +134,6 @@ TEXTS = {
             "🎧 <b>Audio:</b> send an audio file\n"
             "💱 Any currency works: 'taxi 12 dollars' — I'll convert it.\n\n"
             "<b>Commands</b>\n"
-            "💰 /budget [amount] — set budget\n"
             "🎯 /goals — savings goals\n"
             "📊 /report — monthly report\n"
             "📋 /history — last 10 transactions\n"
@@ -156,8 +144,6 @@ TEXTS = {
             "🗑 /reset — delete all transactions\n"
             "🌐 /lang ru|en — change language"
         ),
-        "budget_set": "✅ <b>Budget updated</b>\n💰 {amount} / month",
-        "budget_invalid": "❌ Please provide a number.\nExample: <code>/budget 5000000</code>",
         "voice_transcribed": "🎤 <i>Heard:</i> “{text}”",
         "photo_processing": "📸 Reading the receipt…",
         "audio_processing": "🎧 Listening to the audio…",
@@ -188,14 +174,6 @@ TEXTS = {
         "menu_hint": "Done! Use the buttons below 👇",
         "open_app_hint": "📱 <b>Finance app</b>\nBeautiful analytics, charts and quick add — all on one screen.",
         "app_unavailable": "📱 The app isn't configured yet (needs a public URL). Use the menu buttons.",
-        "budget_view": (
-            "💰 <b>Monthly budget</b>\n"
-            "━━━━━━━━━━━━━━━━━━━\n\n"
-            "Current: <b>{amount}</b>\n"
-            "{gauge}\n\n"
-            "Pick a new one or tap “Custom”:"
-        ),
-        "budget_custom_prompt": "✏️ Send the budget amount as a number.\nExample: <code>/budget 6000000</code>",
         "more_menu": "⚙️ <b>More</b>\n━━━━━━━━━━━━━━━━━━━\n\nChoose an action:",
         # ── Savings goals ──
         "goals_hint": "Tap a goal to top it up or edit it",
@@ -241,7 +219,7 @@ TEXTS = {
         "currency_prompt": (
             "💱 <b>Currency</b>\n━━━━━━━━━━━━━━━━━━━\n\n"
             "Current: <b>{currency}</b>\n"
-            "Pick your base currency — budget and analytics are calculated in it:"
+            "Pick your base currency:"
         ),
         "currency_changed": (
             "✅ Base currency: <b>{currency}</b>\n"

@@ -44,7 +44,6 @@ from services.supabase_service import (
     delete_task_folder,
     delete_transaction,
     get_all_events,
-    get_balance,
     get_debts,
     get_events_for_month,
     get_goals,
@@ -60,7 +59,6 @@ from services.supabase_service import (
     now_local,
     save_transaction,
     settle_debt,
-    update_budget,
     update_currency,
     update_event,
     update_goal,
@@ -77,7 +75,6 @@ logger = logging.getLogger(__name__)
 
 STATIC_DIR = Path(__file__).parent / "static"
 CATEGORIES = list(CATEGORY_EMOJI.keys())
-DEFAULT_BUDGET = float(os.getenv("DEFAULT_MONTHLY_BUDGET", 5_000_000))
 
 # Income categories (transactions.type='income'). Expenses use CATEGORY_EMOJI.
 INCOME_EMOJI = {
@@ -389,7 +386,6 @@ def create_app() -> FastAPI:
     async def api_me(user: dict = Depends(current_user)):
         return {
             "first_name": user.get("first_name"),
-            "budget": _f(user.get("monthly_budget", DEFAULT_BUDGET)),
             "currency": normalize_currency(user.get("currency"), DEFAULT_CURRENCY),
             "language": user.get("language", "ru"),
             "notify": notify_settings_of(user),
@@ -402,26 +398,18 @@ def create_app() -> FastAPI:
 
     @app.get("/api/overview")
     async def api_overview(user: dict = Depends(current_user)):
-        """Dayon home: running balance, this-month income/expense/avg-per-day,
+        """Dayon home: this-month net (income − expense), income/expense/avg-per-day,
         recent operations, and upcoming obligations (active recurring payments)."""
         uid = user["telegram_id"]
         base = normalize_currency(user.get("currency"), DEFAULT_CURRENCY)
-        budget = _f(user.get("monthly_budget", DEFAULT_BUDGET))
         now = now_local()
         today = now.date()
         month_first = f"{now.year:04d}-{now.month:02d}-01"
 
-        balance, report, payments = await asyncio.gather(
-            get_balance(uid),
+        report, payments = await asyncio.gather(
             get_period_report(uid, month_first, today.isoformat()),
             get_payments(uid),
         )
-
-        month_expense = report["expense"]
-        month_income = report["income"]
-        days_elapsed = today.day or 1
-        avg_day = month_expense / days_elapsed
-        percent = (month_expense / budget * 100) if budget > 0 else 0.0
 
         recent = [_tx_dto(r) for r in report["transactions"][:6]]
         obligations = [
@@ -430,16 +418,11 @@ def create_app() -> FastAPI:
 
         return {
             "currency": base,
-            "balance": balance["balance"],
-            "income_all": balance["income"],
-            "expense_all": balance["expense"],
-            "month_income": month_income,
-            "month_expense": month_expense,
-            "avg_day": avg_day,
+            "balance": report["balance"],          # net this month = income − expense
+            "month_income": report["income"],
+            "month_expense": report["expense"],
+            "avg_day": report["expense"] / (today.day or 1),
             "month_count": report["count"],
-            "budget": budget,
-            "percent": percent,
-            "warning": percent >= 100,
             "recent": recent,
             "obligations": obligations,
         }
@@ -491,12 +474,9 @@ def create_app() -> FastAPI:
     @app.post("/api/quick-add")
     async def api_quick_add(q: QuickAdd, user: dict = Depends(current_user)):
         uid = user["telegram_id"]
-        budget = _f(user.get("monthly_budget", DEFAULT_BUDGET))
         base = normalize_currency(user.get("currency"), DEFAULT_CURRENCY)
         ctx = {
             "language": user.get("language", "ru"),
-            "monthly_budget": budget,
-            "spent_this_month": 0,
             "currency": base,
         }
         result = await parse_text_purchase(q.text or "", ctx)
@@ -525,17 +505,6 @@ def create_app() -> FastAPI:
         if not deleted:
             raise HTTPException(status_code=404, detail="Not found")
         return {"ok": True}
-
-    class BudgetBody(BaseModel):
-        amount: float
-
-    @app.post("/api/budget")
-    async def api_budget(b: BudgetBody, user: dict = Depends(current_user)):
-        uid = user["telegram_id"]
-        if not _valid_amount(b.amount):
-            raise HTTPException(status_code=400, detail="amount must be > 0")
-        await update_budget(uid, float(b.amount))
-        return {"ok": True, "budget": float(b.amount)}
 
     class LangBody(BaseModel):
         language: str
@@ -1102,7 +1071,7 @@ def create_app() -> FastAPI:
         data = await _gather_export(uid)
         xls = _build_export_xls(data)
         lang = user.get("language", "ru")
-        caption = "📊 Ваши данные Dayon" if lang == "ru" else "📊 Your Dayon data"
+        caption = "📊 Ваши данные" if lang == "ru" else "📊 Your data"
         ok = await _send_tg_document(uid, "finances.xlsx", xls, caption)
         if not ok:
             raise HTTPException(status_code=502, detail="could not send file")
