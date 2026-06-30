@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-<title>Dayon</title>
+<title>Финансы</title>
 <script src="https://telegram.org/js/telegram-web-app.js"></script>
 <style>
 :root{
@@ -11,10 +11,17 @@
   --text:#FFFFFF; --muted:#8C92A2; --faint:#5A6072;
   --accent:#2BD96B; --accent-press:#22b757; --accent-soft:rgba(43,217,107,.14); --on-accent:#04130A;
   --pos:#2BD96B; --dang:#FF5B5B; --warn:#FFB23E; --info:#4AA8FF;
-  --border:#262A33; --hair:#20242C; --scrim:rgba(4,5,9,.64);
+  --border:#262A33; --hair:#20242C; --scrim:rgba(4,5,9,.64); --nav-bg:rgba(20,22,27,.94);
   --r:18px; --r-sm:13px;
   --safe-t:env(safe-area-inset-top,0px); --safe-b:env(safe-area-inset-bottom,0px);
 }
+body.light{
+  --bg:#EDF0F4; --bg-2:#FFFFFF; --surface:#FFFFFF; --surface-2:#F2F5F8; --surface-3:#E6EAF1;
+  --text:#10141B; --muted:#697086; --faint:#9298A8;
+  --border:#E2E6EE; --hair:#EBEEF3; --scrim:rgba(16,20,27,.4);
+  --pos:#12A150; --dang:#E5484D; --warn:#E08200; --nav-bg:rgba(255,255,255,.95);
+}
+.hello{font-size:22px;font-weight:800;letter-spacing:-.02em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
 *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body{margin:0;padding:0;height:100%}
 body{
@@ -79,7 +86,7 @@ body{
 /* info banner */
 .banner{display:flex;gap:11px;align-items:flex-start;background:var(--accent-soft);border:1px solid var(--accent);border-radius:14px;padding:13px 14px;margin-bottom:14px}
 .banner .bic{flex:0 0 auto;width:22px;height:22px;border-radius:50%;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:800}
-.banner .btx{flex:1;font-size:12.5px;color:#cdd2dd;line-height:1.45}
+.banner .btx{flex:1;font-size:12.5px;color:var(--muted);line-height:1.45}
 .banner .bx{flex:0 0 auto;color:var(--muted);cursor:pointer;font-size:17px;line-height:1;padding:0 2px}
 
 /* segmented tabs */
@@ -131,7 +138,7 @@ body{
 
 /* tab bar */
 .tabbar{position:fixed;left:0;right:0;bottom:0;z-index:40;display:flex;justify-content:center;padding:0 10px calc(8px + var(--safe-b));pointer-events:none}
-.tabbar .inner{pointer-events:auto;width:100%;max-width:480px;background:rgba(20,22,27,.94);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid var(--border);border-radius:22px;display:flex;align-items:center;justify-content:space-between;padding:7px;gap:2px;box-shadow:0 12px 32px -8px rgba(0,0,0,.7)}
+.tabbar .inner{pointer-events:auto;width:100%;max-width:480px;background:var(--nav-bg);backdrop-filter:blur(18px);-webkit-backdrop-filter:blur(18px);border:1px solid var(--border);border-radius:22px;display:flex;align-items:center;justify-content:space-between;padding:7px;gap:2px;box-shadow:0 12px 32px -8px rgba(0,0,0,.7)}
 .tab{flex:1;display:flex;flex-direction:column;align-items:center;gap:4px;background:none;border:none;color:var(--faint);font-size:10px;font-weight:600;cursor:pointer;padding:8px 1px;border-radius:15px;transition:background .2s,color .2s}
 .tab .ic{height:22px;display:flex;align-items:center}
 .tab .ic svg{width:22px;height:22px;display:block;stroke:currentColor;fill:none;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
@@ -192,7 +199,7 @@ body{
 .privtext{font-size:12.5px;color:var(--muted);line-height:1.5;margin:2px 4px 12px}
 .swatches{display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px}
 .swatch{width:38px;height:38px;border-radius:11px;cursor:pointer;border:2px solid transparent}
-.swatch.on{border-color:#fff}
+.swatch.on{border-color:var(--text)}
 .tg{display:flex;justify-content:space-between;align-items:center;padding:13px 4px;border-bottom:1px solid var(--hair)}
 .tg:last-child{border-bottom:none}
 .tg .lbl{font-size:13.5px;font-weight:600}
@@ -220,7 +227,7 @@ body{
   <!-- ░░ OVERVIEW ░░ -->
   <section class="screen active" id="s-overview">
     <div class="phead">
-      <div class="brand">Day<span class="on">on</span></div>
+      <div class="hello" id="ovHello">Привет 👋</div>
       <div class="hbtns">
         <span class="chip" id="opsChip">📊 0</span>
         <button class="iconbtn" id="openSettings" aria-label="Настройки"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-2.82 1.17V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 8 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15H4.5a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 6 9.4l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 11 6.6V4.5a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 18 6.6l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 11h.1a2 2 0 0 1 0 4z"/></svg></button>
@@ -356,7 +363,7 @@ body{
 </div></div>
 
 <div class="toast" id="toast"><span id="toastMsg"></span><button id="toastAct"></button></div>
-<div class="gate" id="gate" style="display:none"><div class="e">📱</div><div style="font-weight:700">Откройте приложение из Telegram</div><div class="muted" style="font-size:13px">Нажмите «Open Dayon app» в боте.</div></div>
+<div class="gate" id="gate" style="display:none"><div class="e">📱</div><div style="font-weight:700">Откройте приложение из Telegram</div><div class="muted" style="font-size:13px">Нажмите кнопку приложения в боте.</div></div>
 
 <script>
 "use strict";
@@ -427,6 +434,12 @@ function applyAccent(name){
   r.setProperty("--accent",a.a);r.setProperty("--accent-soft",a.s);r.setProperty("--accent-press",a.p);r.setProperty("--on-accent",a.o);
 }
 function curAccent(){try{return localStorage.getItem("dayon_accent")||"green";}catch(e){return "green";}}
+function curTheme(){try{return localStorage.getItem("dayon_theme")||"dark";}catch(e){return "dark";}}
+function applyTheme(t){
+  const light=t==="light";
+  document.body.classList.toggle("light",light);
+  try{if(TG){const bg=light?"#EDF0F4":"#0A0B0E";TG.setBackgroundColor&&TG.setBackgroundColor(bg);TG.setHeaderColor&&TG.setHeaderColor(bg);}}catch(e){}
+}
 
 /* ════════ OVERVIEW ════════ */
 function opRow(t){
@@ -859,7 +872,7 @@ function renderSettings(){
   const cur=CURRENCIES[CURCODE]?CURCODE:"UZS";
   document.getElementById("setBody").innerHTML=`
   <div class="setgrp"><div class="gh">Внешний вид</div>
-    <div class="setrow" id="rowTheme"><span class="l">Тема</span><span class="r">🌙 Тёмная</span></div>
+    <div class="setrow" id="rowTheme"><span class="l">Тема</span><span class="r">${curTheme()==="light"?"☀️ Светлая":"🌙 Тёмная"} ›</span></div>
     <div class="setrow" style="cursor:default;display:block">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span class="l">Цвет акцента</span></div>
       <div class="swatches" id="accSwatches">${swatches}</div>
@@ -883,7 +896,7 @@ function renderSettings(){
     <div class="setrow dz outline" id="rowDel"><span class="l">⛔ Удалить аккаунт</span><span class="r">›</span></div>
   </div>`;
   document.querySelectorAll("#accSwatches .swatch").forEach(s=>s.onclick=()=>{try{localStorage.setItem("dayon_accent",s.dataset.acc);}catch(e){}applyAccent(s.dataset.acc);haptic("sel");renderSettings();});
-  document.getElementById("rowTheme").onclick=()=>toast("Доступна тёмная тема");
+  document.getElementById("rowTheme").onclick=()=>{const t=curTheme()==="dark"?"light":"dark";try{localStorage.setItem("dayon_theme",t);}catch(e){}applyTheme(t);haptic("sel");renderSettings();};
   document.getElementById("rowNotif").onclick=()=>toggleSub("notif");
   document.getElementById("rowLang").onclick=()=>toggleSub("lang");
   document.getElementById("rowCur").onclick=()=>toggleSub("cur");
@@ -909,11 +922,11 @@ function toggleSub(which){
     box.innerHTML=`<div class="setgrp"><div class="gh">Валюта</div><div class="curgrid">${list.map(c=>`<div class="curchip ${c.code===CURCODE?'on':''}" data-c="${c.code}"><span class="fl">${c.flag}</span>${c.code}</div>`).join("")}</div></div>`;
     box.querySelectorAll(".curchip").forEach(ch=>ch.onclick=async()=>{const code=ch.dataset.c;if(code===CURCODE)return;haptic("sel");try{await api("/api/currency",{method:"POST",body:{currency:code}});CURCODE=code;if(ME)ME.currency=code;SUB_OPEN=null;renderSettings();loadOverview();}catch(e){toast("Ошибка");}});
   }else if(which==="priv"){
-    box.innerHTML=`<div class="setgrp"><div class="privtext privext">Dayon хранит ваши данные в защищённой базе с построчной изоляцией доступа (RLS). Аутентификация выполняется через подпись Telegram. Вы в любой момент можете выгрузить или удалить свои данные ниже.</div></div>`;
+    box.innerHTML=`<div class="setgrp"><div class="privtext privext">Приложение хранит ваши данные в защищённой базе с построчной изоляцией доступа (RLS). Аутентификация выполняется через подпись Telegram. Вы в любой момент можете выгрузить или удалить свои данные ниже.</div></div>`;
   }
 }
 async function exportData(){
-  try{const d=await api("/api/export");const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="dayon-export.json";a.click();haptic("notif");toast("Данные выгружены");}
+  try{const d=await api("/api/export");const blob=new Blob([JSON.stringify(d,null,2)],{type:"application/json"});const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="finances-export.json";a.click();haptic("notif");toast("Данные выгружены");}
   catch(e){toast("Ошибка экспорта");}
 }
 async function wipeData(){
@@ -954,6 +967,27 @@ function openAdd(kind){
   else if(kind==="event")openEvent();
   else if(kind==="payment")openPayment();
   else if(kind==="task")openTask();
+}
+
+/* ════════ swipe between tabs ════════ */
+const TAB_ORDER=["overview","reports","events","payments","tasks"];
+function bindSwipe(){
+  const app=document.getElementById("app");let sx=0,sy=0,st=0,go=false;
+  app.addEventListener("touchstart",e=>{
+    if(document.querySelector(".sheetwrap.open")){go=false;return;}
+    if(e.target.closest(".segs,.swatches,input,textarea,select")){go=false;return;}
+    const t=e.touches[0];sx=t.clientX;sy=t.clientY;st=Date.now();go=true;
+  },{passive:true});
+  app.addEventListener("touchend",e=>{
+    if(!go)return;go=false;
+    const t=e.changedTouches[0],dx=t.clientX-sx,dy=t.clientY-sy;
+    if(Date.now()-st>700)return;                                  // too slow → not a swipe
+    if(Math.abs(dx)<60||Math.abs(dx)<Math.abs(dy)*1.6)return;     // must be a clear horizontal swipe
+    const cur=((document.querySelector(".screen.active")||{}).id||"s-overview").replace("s-","");
+    const i=TAB_ORDER.indexOf(cur), ni=dx<0?i+1:i-1;             // swipe left → next, right → prev
+    if(ni<0||ni>=TAB_ORDER.length)return;
+    switchTab(TAB_ORDER[ni]);haptic("sel");
+  },{passive:true});
 }
 
 /* ════════ init ════════ */
@@ -1019,10 +1053,13 @@ function fmtAmtInput(id,curGetter,after){
 
 async function init(){
   applyAccent(curAccent());
-  if(TG){try{TG.ready();TG.expand();TG.setHeaderColor&&TG.setHeaderColor("#0A0B0E");TG.setBackgroundColor&&TG.setBackgroundColor("#0A0B0E");}catch(e){}}
+  document.body.classList.toggle("light",curTheme()==="light");
+  if(TG){try{TG.ready();TG.expand();}catch(e){}}
+  applyTheme(curTheme());
   if(!INIT){showGate();return;}
-  bindUI();
+  bindUI();bindSwipe();
   const ok=await loadMe();if(!ok)return;
+  if(ME&&ME.first_name)document.getElementById("ovHello").textContent="Привет, "+ME.first_name;
   await loadCats();
   loadOverview();
 }
