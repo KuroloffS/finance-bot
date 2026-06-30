@@ -295,48 +295,55 @@ async def _gather_export(uid: int) -> dict:
 _NUMRE = re.compile(r"-?\d+(\.\d+)?")
 
 
-def _xls_cell(v) -> str:
+def _cell(v):
+    """Coerce a value for an Excel cell — numeric strings become real numbers."""
     if v is None:
-        v = ""
-    is_num = (isinstance(v, (int, float)) and not isinstance(v, bool)) or (
-        isinstance(v, str) and v != "" and _NUMRE.fullmatch(v) is not None
-    )
-    s = (str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
-         .replace("\n", " ").replace("\r", " "))
-    return f'<Cell><Data ss:Type="{"Number" if is_num else "String"}">{s}</Data></Cell>'
-
-
-def _xls_sheet(name: str, headers: list, rows: list) -> str:
-    hd = "<Row>" + "".join(f'<Cell><Data ss:Type="String">{h}</Data></Cell>' for h in headers) + "</Row>"
-    bd = "".join("<Row>" + "".join(_xls_cell(c) for c in r) + "</Row>" for r in rows)
-    return f'<Worksheet ss:Name="{name}"><Table>{hd}{bd}</Table></Worksheet>'
+        return ""
+    if isinstance(v, (int, float)) and not isinstance(v, bool):
+        return v
+    s = str(v)
+    if _NUMRE.fullmatch(s):
+        try:
+            return float(s)
+        except ValueError:
+            pass
+    return s
 
 
 def _build_export_xls(data: dict) -> bytes:
-    """SpreadsheetML 2003 workbook (.xls) — opens in Excel, one sheet per module."""
+    """Real .xlsx workbook (OOXML) via openpyxl — one sheet per module."""
+    from io import BytesIO
+    from openpyxl import Workbook
+
     sheets = [
-        _xls_sheet("Операции", ["Дата", "Тип", "Категория", "Сумма", "Заметка", "Магазин"],
-                   [[t["purchase_date"], "доход" if t["type"] == "income" else "расход", t["category"],
-                     t["amount"], t["description"], t["merchant"]] for t in data.get("transactions", [])]),
-        _xls_sheet("Платежи", ["Название", "Категория", "Сумма", "Валюта", "Период", "След. платёж", "Статус"],
-                   [[p["name"], p["category"], p["amount"], p["currency"], p["period"], p["next_due_date"], p["status"]]
-                    for p in data.get("payments", [])]),
-        _xls_sheet("Задачи", ["Задача", "Статус", "Приоритет", "Срок", "Теги"],
-                   [[t["title"], t["status"], t.get("priority") or "", t.get("due_date") or "",
-                     ", ".join(t.get("tags") or [])] for t in data.get("tasks", [])]),
-        _xls_sheet("События", ["Дата", "Время", "Событие", "Заметка"],
-                   [[e["date"], e.get("time") or "", e["title"], e["note"]] for e in data.get("events", [])]),
-        _xls_sheet("Цели", ["Цель", "Накоплено", "Сумма цели", "Валюта", "Статус"],
-                   [[x.get("title", ""), x.get("saved_amount", 0), x.get("target_amount", 0),
-                     x.get("currency", ""), x.get("status", "")] for x in data.get("goals", [])]),
-        _xls_sheet("Долги", ["Контрагент", "Направление", "Сумма", "Оплачено", "Валюта", "Статус"],
-                   [[x.get("counterparty", ""), x.get("direction", ""), x.get("amount", 0),
-                     x.get("paid_amount", 0), x.get("currency", ""), x.get("status", "")] for x in data.get("debts", [])]),
+        ("Операции", ["Дата", "Тип", "Категория", "Сумма", "Заметка", "Магазин"],
+         [[t["purchase_date"], "доход" if t["type"] == "income" else "расход", t["category"],
+           t["amount"], t["description"], t["merchant"]] for t in data.get("transactions", [])]),
+        ("Платежи", ["Название", "Категория", "Сумма", "Валюта", "Период", "След. платёж", "Статус"],
+         [[p["name"], p["category"], p["amount"], p["currency"], p["period"], p["next_due_date"], p["status"]]
+          for p in data.get("payments", [])]),
+        ("Задачи", ["Задача", "Статус", "Приоритет", "Срок", "Теги"],
+         [[t["title"], t["status"], t.get("priority") or "", t.get("due_date") or "",
+           ", ".join(t.get("tags") or [])] for t in data.get("tasks", [])]),
+        ("События", ["Дата", "Время", "Событие", "Заметка"],
+         [[e["date"], e.get("time") or "", e["title"], e["note"]] for e in data.get("events", [])]),
+        ("Цели", ["Цель", "Накоплено", "Сумма цели", "Валюта", "Статус"],
+         [[x.get("title", ""), x.get("saved_amount", 0), x.get("target_amount", 0),
+           x.get("currency", ""), x.get("status", "")] for x in data.get("goals", [])]),
+        ("Долги", ["Контрагент", "Направление", "Сумма", "Оплачено", "Валюта", "Статус"],
+         [[x.get("counterparty", ""), x.get("direction", ""), x.get("amount", 0),
+           x.get("paid_amount", 0), x.get("currency", ""), x.get("status", "")] for x in data.get("debts", [])]),
     ]
-    xml = ('<?xml version="1.0" encoding="UTF-8"?>\n<?mso-application progid="Excel.Sheet"?>\n'
-           '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" '
-           'xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">' + "".join(sheets) + "</Workbook>")
-    return ("﻿" + xml).encode("utf-8")
+    wb = Workbook()
+    for i, (name, headers, rows) in enumerate(sheets):
+        ws = wb.active if i == 0 else wb.create_sheet()
+        ws.title = name[:31]
+        ws.append(headers)
+        for r in rows:
+            ws.append([_cell(c) for c in r])
+    buf = BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
 
 
 async def _send_tg_document(chat_id: int, filename: str, content: bytes, caption: str = "") -> bool:
@@ -348,7 +355,7 @@ async def _send_tg_document(chat_id: int, filename: str, content: bytes, caption
     data = {"chat_id": str(chat_id)}
     if caption:
         data["caption"] = caption
-    files = {"document": (filename, content, "application/vnd.ms-excel")}
+    files = {"document": (filename, content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")}
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             r = await client.post(f"https://api.telegram.org/bot{token}/sendDocument", data=data, files=files)
@@ -1096,7 +1103,7 @@ def create_app() -> FastAPI:
         xls = _build_export_xls(data)
         lang = user.get("language", "ru")
         caption = "📊 Ваши данные Dayon" if lang == "ru" else "📊 Your Dayon data"
-        ok = await _send_tg_document(uid, "finances.xls", xls, caption)
+        ok = await _send_tg_document(uid, "finances.xlsx", xls, caption)
         if not ok:
             raise HTTPException(status_code=502, detail="could not send file")
         return {"ok": True}

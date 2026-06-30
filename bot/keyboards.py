@@ -31,7 +31,6 @@ def debts_keyboard(url: str, lang: str = "ru") -> InlineKeyboardMarkup:
 
 MENU = {
     "ru": {
-        "analytics": "📊 Аналитика",
         "history": "📋 История",
         "goals": "🎯 Цели",
         "budget": "💰 Бюджет",
@@ -40,7 +39,6 @@ MENU = {
         "more": "⚙️ Ещё",
     },
     "en": {
-        "analytics": "📊 Analytics",
         "history": "📋 History",
         "goals": "🎯 Goals",
         "budget": "💰 Budget",
@@ -54,9 +52,9 @@ MENU = {
 def main_menu_keyboard(lang: str = "ru") -> ReplyKeyboardMarkup:
     m = MENU.get(lang, MENU["ru"])
     rows = [
-        [KeyboardButton(m["analytics"]), KeyboardButton(m["history"])],
-        [KeyboardButton(m["goals"]), KeyboardButton(m["budget"])],
-        [KeyboardButton(m["tips"]), KeyboardButton(m["more"])],
+        [KeyboardButton(m["history"]), KeyboardButton(m["goals"])],
+        [KeyboardButton(m["budget"]), KeyboardButton(m["tips"])],
+        [KeyboardButton(m["more"])],
     ]
     placeholder = "Напиши трату или выбери действие…" if lang == "ru" else "Type a purchase or pick an action…"
     return ReplyKeyboardMarkup(
@@ -72,13 +70,13 @@ def main_menu_keyboard(lang: str = "ru") -> ReplyKeyboardMarkup:
 
 def saved_card_keyboard(tx_id, lang: str = "ru") -> InlineKeyboardMarkup:
     undo = "↩️ Отменить" if lang == "ru" else "↩️ Undo"
-    stats = "📊 Аналитика" if lang == "ru" else "📊 Analytics"
+    rep = "📈 Отчёт" if lang == "ru" else "📈 Report"
     row = []
     # Only offer Undo when we know the exact transaction id — never fall back to
     # "delete the latest", which could remove an unrelated newer purchase.
     if tx_id:
         row.append(InlineKeyboardButton(undo, callback_data=f"undo:{tx_id}"))
-    row.append(InlineKeyboardButton(stats, callback_data="nav:analytics"))
+    row.append(InlineKeyboardButton(rep, callback_data="nav:report"))
     return InlineKeyboardMarkup([row])
 
 
@@ -106,25 +104,13 @@ def analytics_keyboard(lang: str = "ru", offset: int = 0) -> InlineKeyboardMarku
 
 
 def report_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
-    if lang == "ru":
-        stats, prev = "📊 Аналитика", "🗓 Прошлый месяц"
-    else:
-        stats, prev = "📊 Analytics", "🗓 Last month"
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(stats, callback_data="nav:analytics"),
-          InlineKeyboardButton(prev, callback_data="rep:prev")]]
-    )
+    prev = "🗓 Прошлый месяц" if lang == "ru" else "🗓 Last month"
+    return InlineKeyboardMarkup([[InlineKeyboardButton(prev, callback_data="rep:prev")]])
 
 
 def prev_report_keyboard(lang: str = "ru") -> InlineKeyboardMarkup:
-    if lang == "ru":
-        stats, cur = "📊 Аналитика", "📅 Текущий месяц"
-    else:
-        stats, cur = "📊 Analytics", "📅 Current month"
-    return InlineKeyboardMarkup(
-        [[InlineKeyboardButton(stats, callback_data="nav:analytics"),
-          InlineKeyboardButton(cur, callback_data="nav:report")]]
-    )
+    cur = "📅 Текущий месяц" if lang == "ru" else "📅 Current month"
+    return InlineKeyboardMarkup([[InlineKeyboardButton(cur, callback_data="nav:report")]])
 
 
 def history_delete_keyboard(transactions: list, lang: str) -> InlineKeyboardMarkup:
@@ -136,14 +122,8 @@ def history_delete_keyboard(transactions: list, lang: str) -> InlineKeyboardMark
         label = f"🗑 {emoji} {format_amount(tx.get('amount', 0))}"
         rows.append([InlineKeyboardButton(label, callback_data=f"del:{tx['id']}")])
 
-    if lang == "ru":
-        refresh, stats = "🔄 Обновить", "📊 Аналитика"
-    else:
-        refresh, stats = "🔄 Refresh", "📊 Analytics"
-    rows.append(
-        [InlineKeyboardButton(refresh, callback_data="hist:refresh"),
-         InlineKeyboardButton(stats, callback_data="nav:analytics")]
-    )
+    refresh = "🔄 Обновить" if lang == "ru" else "🔄 Refresh"
+    rows.append([InlineKeyboardButton(refresh, callback_data="hist:refresh")])
     return InlineKeyboardMarkup(rows)
 
 

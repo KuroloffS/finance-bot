@@ -1224,7 +1224,6 @@ async def _goal_callback(update, context, query, user_id, lang, data):
 # Reply-keyboard taps arrive as plain text — route them BEFORE the purchase parser.
 
 BUTTON_ROUTES = {
-    "📊 Аналитика": "analytics", "📊 Analytics": "analytics",
     "📋 История": "history", "📋 History": "history",
     "🎯 Цели": "goals", "🎯 Goals": "goals",
     "💰 Бюджет": "budget_view", "💰 Budget": "budget_view",
@@ -1367,7 +1366,6 @@ async def photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 # Wire menu-button routes to handler functions (after definitions).
 _ROUTE_FUNCS.update({
-    "analytics": analytics_handler,
     "history": history_handler,
     "goals": goals_handler,
     "budget_view": budget_view_handler,
@@ -1387,7 +1385,6 @@ def register_handlers(application: Application) -> None:
     application.add_handler(CommandHandler("currency", currency_handler))
     application.add_handler(CommandHandler("settings", settings_handler))
     application.add_handler(CommandHandler("report", report_handler))
-    application.add_handler(CommandHandler("analytics", analytics_handler))
     application.add_handler(CommandHandler("history", history_handler))
     application.add_handler(CommandHandler("tips", tips_handler))
     application.add_handler(CommandHandler("lang", lang_handler))
