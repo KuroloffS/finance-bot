@@ -67,6 +67,7 @@ from services.supabase_service import (
     get_last_transactions,
     get_month_spent_through_day,
     get_monthly_summary,
+    get_month_report_data,
     get_monthly_summary_for,
     get_or_create_user,
     make_budget_status,
@@ -93,6 +94,7 @@ from utils.formatters import (
     format_goals_list,
     format_history,
     format_large_tx_alert,
+    format_month_overview,
     format_monthly_report,
     format_saved_card,
     format_tips,
@@ -495,14 +497,13 @@ async def report_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         currency = _currency_of(user)
         logger.info("report telegram_id=%s", user_id)
 
-        summary = await get_monthly_summary(user_id)
-        if not summary:
+        data = await get_month_report_data(user_id, currency)
+        if not data.get("has_activity"):
             await update.message.reply_text(t("empty_report", lang), parse_mode="HTML")
             return
 
-        status = await get_budget_status(user_id, budget=_budget_of(user))
         await update.message.reply_text(
-            format_monthly_report(summary, status, lang, currency=currency),
+            format_month_overview(data, lang, currency=currency),
             parse_mode="HTML",
             reply_markup=report_keyboard(lang),
         )
@@ -989,13 +990,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         # ── Open report (new message) ──
         if data == "nav:report":
             await query.answer()
-            summary = await get_monthly_summary(user_id)
-            if not summary:
+            rep = await get_month_report_data(user_id, currency)
+            if not rep.get("has_activity"):
                 await query.message.reply_text(t("empty_report", lang), parse_mode="HTML")
                 return
-            status = await get_budget_status(user_id, budget=budget)
             await query.message.reply_text(
-                format_monthly_report(summary, status, lang, currency=currency),
+                format_month_overview(rep, lang, currency=currency),
                 parse_mode="HTML", reply_markup=report_keyboard(lang),
             )
             return

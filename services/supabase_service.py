@@ -6,6 +6,8 @@ from datetime import date, datetime, timedelta
 import pytz
 from supabase import create_client, Client
 
+from services.currency_service import convert, normalize_currency
+
 logger = logging.getLogger(__name__)
 
 _TZ = pytz.timezone("Asia/Tashkent")
@@ -436,6 +438,7 @@ DEFAULT_NOTIFY = {
     "weekly_summary": True,   # Sunday week recap
     "goal_reminders": True,   # savings-goal deadline nudges
     "debt_reminders": True,   # debt/loan due-date nudges
+    "payment_reminders": True,  # recurring payment due-tomorrow nudges
 }
 
 
@@ -996,6 +999,55 @@ async def get_period_report(user_id: int, start_iso: str, end_iso: str) -> dict:
     except Exception as e:
         logger.error("get_period_report error user_id=%s: %s", user_id, e)
         return {"income": 0.0, "expense": 0.0, "balance": 0.0, "count": 0, "transactions": []}
+
+
+async def get_month_report_data(user_id: int, base_currency: str) -> dict:
+    """Aggregate the current month for the bot's monthly overview: running balance,
+    income/expense, avg per day, top expense category, tasks done, events passed,
+    services paid this month, and the active monthly services cost (base currency)."""
+    now = now_local()
+    today = now.date()
+    month_first = f"{now.year:04d}-{now.month:02d}-01"
+    month_prefix = month_first[:7]
+    bal, report, payments, tasks, events = await asyncio.gather(
+        get_balance(user_id),
+        get_period_report(user_id, month_first, today.isoformat()),
+        get_payments(user_id),
+        get_tasks(user_id),
+        get_events_for_month(user_id, month_first),
+    )
+    cats: dict[str, float] = {}
+    for r in report["transactions"]:
+        if r.get("type") == "income":
+            continue
+        c = r.get("category", "Другое")
+        cats[c] = cats.get(c, 0.0) + float(r.get("amount") or 0)
+    top_category = max(cats, key=cats.get) if cats else None
+    tasks_done = sum(
+        1 for t in tasks
+        if t.get("status") == "done" and str(t.get("completed_at") or "")[:7] == month_prefix
+    )
+    events_done = sum(1 for e in events if str(e.get("event_date") or "")[:10] <= today.isoformat())
+    services_paid = sum(1 for p in payments if str(p.get("last_paid_date") or "")[:7] == month_prefix)
+    mult = {"weekly": 52 / 12, "monthly": 1.0, "yearly": 1 / 12}
+    services_monthly = 0.0
+    for p in payments:
+        if p.get("status") != "active":
+            continue
+        amt = await convert(float(p.get("amount") or 0), normalize_currency(p.get("currency"), base_currency), base_currency)
+        services_monthly += amt * mult.get(p.get("period", "monthly"), 1.0)
+    return {
+        "balance": bal["balance"],
+        "income": report["income"],
+        "expense": report["expense"],
+        "avg_day": report["expense"] / (today.day or 1),
+        "top_category": top_category,
+        "tasks_done": tasks_done,
+        "events_done": events_done,
+        "services_paid": services_paid,
+        "services_monthly": services_monthly,
+        "has_activity": bool(report["income"] or report["expense"] or payments or tasks or events),
+    }
 
 
 # ───────────────────────── Calendar events ─────────────────────────

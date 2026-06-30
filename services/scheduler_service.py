@@ -11,7 +11,8 @@ from services.supabase_service import (
     get_budget_status,
     get_debts,
     get_goals,
-    get_monthly_summary,
+    get_month_report_data,
+    get_payments,
     get_transactions_in_range,
     mark_notif_sent,
     notify_settings_of,
@@ -21,7 +22,8 @@ from utils.formatters import (
     format_daily_digest,
     format_debt_reminder,
     format_goal_pulse,
-    format_monthly_report,
+    format_month_overview,
+    format_payment_reminder,
     format_weekly_summary,
 )
 
@@ -56,11 +58,10 @@ def setup_scheduler(application) -> AsyncIOScheduler:
                 tid = user["telegram_id"]
                 lang = user.get("language", "ru")
                 cur = normalize_currency(user.get("currency"), DEFAULT_CURRENCY)
-                summary = await get_monthly_summary(tid)
-                if not summary:
+                data = await get_month_report_data(tid, cur)
+                if not data.get("has_activity"):
                     continue
-                status = await get_budget_status(tid, budget=float(user.get("monthly_budget") or 5_000_000))
-                await _send(tid, format_monthly_report(summary, status, lang, currency=cur))
+                await _send(tid, format_month_overview(data, lang, currency=cur))
                 logger.info("monthly report sent to %s", tid)
             except Exception as e:
                 logger.warning("monthly report failed %s: %s", user.get("telegram_id"), e)
@@ -189,6 +190,35 @@ def setup_scheduler(application) -> AsyncIOScheduler:
                 await _send(tid, text)
             except Exception as e:
                 logger.warning("debt reminder failed %s: %s", user.get("telegram_id"), e)
+
+    # ── Recurring-payment reminders — daily (09:00), payments due tomorrow ──
+    async def send_payment_reminders():
+        logger.info("scheduler: payment reminders")
+        users = await get_all_users()
+        today = now_local().date()
+        dkey = f"payment_reminder:{today.isoformat()}"
+        for user in users:
+            try:
+                if not notify_settings_of(user).get("payment_reminders", True):
+                    continue
+                tid = user["telegram_id"]
+                lang = user.get("language", "ru")
+                cur = normalize_currency(user.get("currency"), DEFAULT_CURRENCY)
+                payments = await get_payments(tid)
+                text = format_payment_reminder(payments, lang, today=today, currency=cur)
+                if not text:  # nothing due tomorrow → don't nag
+                    continue
+                if not await mark_notif_sent(tid, "payment", dkey):
+                    continue
+                await _send(tid, text)
+            except Exception as e:
+                logger.warning("payment reminder failed %s: %s", user.get("telegram_id"), e)
+
+    scheduler.add_job(
+        send_payment_reminders,
+        trigger=CronTrigger(hour=9, minute=0),
+        id="payment_reminders", replace_existing=True,
+    )
 
     scheduler.add_job(
         send_goal_pulse, args=["morning"],

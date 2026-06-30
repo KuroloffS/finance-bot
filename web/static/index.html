@@ -863,7 +863,7 @@ async function addFolder(){
 }
 
 /* ════════ SETTINGS ════════ */
-const NOTIFY_META=[["budget_alerts","Бюджет 80% и 100%"],["large_tx","Крупные траты"],["weekly_summary","Итоги недели"],["daily_digest","Итоги дня"],["goal_reminders","Напоминания о целях"],["debt_reminders","Напоминания о долгах"]];
+const NOTIFY_META=[["budget_alerts","Бюджет 80% и 100%"],["large_tx","Крупные траты"],["weekly_summary","Итоги недели"],["daily_digest","Итоги дня"],["goal_reminders","Напоминания о целях"],["debt_reminders","Напоминания о долгах"],["payment_reminders","Напоминания о платежах"]];
 function openSettings(){openSheet("setSheet");renderSettings();}
 function renderSettings(){
   const acc=curAccent();
@@ -924,34 +924,9 @@ function toggleSub(which){
     box.innerHTML=`<div class="setgrp"><div class="privtext privext">Приложение хранит ваши данные в защищённой базе с построчной изоляцией доступа (RLS). Аутентификация выполняется через подпись Telegram. Вы в любой момент можете выгрузить или удалить свои данные ниже.</div></div>`;
   }
 }
-function _xc(v){
-  if(v==null)v="";
-  const isNum=(typeof v==="number"&&isFinite(v))||(typeof v==="string"&&v!==""&&/^-?\d+(\.\d+)?$/.test(v));
-  const s=String(v).replace(/[\r\n]+/g," ").replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-  return `<Cell><Data ss:Type="${isNum?"Number":"String"}">${s}</Data></Cell>`;
-}
-function _xsheet(name,headers,rows){
-  const hd=`<Row>${headers.map(h=>`<Cell><Data ss:Type="String">${h}</Data></Cell>`).join("")}</Row>`;
-  const bd=rows.map(r=>`<Row>${r.map(_xc).join("")}</Row>`).join("");
-  return `<Worksheet ss:Name="${name}"><Table>${hd}${bd}</Table></Worksheet>`;
-}
 async function exportData(){
-  try{
-    const d=await api("/api/export");
-    const sheets=[
-      _xsheet("Операции",["Дата","Тип","Категория","Сумма","Заметка","Магазин"],(d.transactions||[]).map(t=>[t.purchase_date,t.type==="income"?"доход":"расход",t.category,t.amount,t.description,t.merchant])),
-      _xsheet("Платежи",["Название","Категория","Сумма","Валюта","Период","След. платёж","Статус"],(d.payments||[]).map(p=>[p.name,p.category,p.amount,p.currency,p.period,p.next_due_date,p.status])),
-      _xsheet("Задачи",["Задача","Статус","Приоритет","Срок","Теги"],(d.tasks||[]).map(t=>[t.title,t.status,t.priority||"",t.due_date||"",(t.tags||[]).join(", ")])),
-      _xsheet("События",["Дата","Время","Событие","Заметка"],(d.events||[]).map(e=>[e.date,e.time||"",e.title,e.note])),
-      _xsheet("Цели",["Цель","Накоплено","Сумма цели","Валюта","Статус"],(d.goals||[]).map(g=>[g.title,g.saved_amount,g.target_amount,g.currency,g.status])),
-      _xsheet("Долги",["Контрагент","Направление","Сумма","Оплачено","Валюта","Статус"],(d.debts||[]).map(x=>[x.counterparty,x.direction,x.amount,x.paid_amount,x.currency,x.status])),
-    ];
-    const xml=`<?xml version="1.0" encoding="UTF-8"?>\n<?mso-application progid="Excel.Sheet"?>\n<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">${sheets.join("")}</Workbook>`;
-    const blob=new Blob(["﻿"+xml],{type:"application/vnd.ms-excel"});
-    const a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="finances.xls";a.click();
-    setTimeout(()=>URL.revokeObjectURL(a.href),1500);
-    haptic("notif");toast("Данные выгружены в Excel");
-  }catch(e){toast("Ошибка экспорта");}
+  try{await api("/api/export/send",{method:"POST"});haptic("notif");toast("Файл отправлен в чат с ботом 📎");}
+  catch(e){toast("Ошибка отправки файла");}
 }
 async function wipeData(){
   if(!confirm("Удалить ВСЕ данные (операции, платежи, события, задачи, цели, долги)? Аккаунт останется."))return;

@@ -1,16 +1,12 @@
 TEXTS = {
     "ru": {
         "welcome": (
-            "👋 <b>Привет, {name}!</b>\n"
-            "Я твой личный финансовый советник 💸\n"
-            "━━━━━━━━━━━━━━━━━━━\n\n"
-            "Просто расскажи о трате — любым способом:\n"
-            "⌨️ <b>Текстом</b> — «такси 25 000»\n"
-            "🎤 <b>Голосом</b> — наговори покупку\n"
-            "📸 <b>Фото</b> — пришли чек\n\n"
-            "Я запишу, разложу по категориям и дам совет 🤝\n"
-            "🎯 А ещё помогу копить на цели и подскажу, когда пора притормозить.\n\n"
-            "👇 А кнопки внизу — для всего остального."
+            "<b>Dayon</b> — ваш ежедневный ассистент для контроля денег, задач и событий.\n\n"
+            "💰 Учитывайте доходы и расходы\n"
+            "📅 Планируйте события и задачи\n"
+            "🧾 Следите за подписками и платежами\n"
+            "💱 Проверяйте курсы валют и конвертируйте суммы\n\n"
+            "Чтобы открыть приложение, нажмите кнопку «Open Dayon app» в нижнем левом углу."
         ),
         "help_text": (
             "ℹ️ <b>Как пользоваться</b>\n"
@@ -133,16 +129,12 @@ TEXTS = {
     },
     "en": {
         "welcome": (
-            "👋 <b>Hi, {name}!</b>\n"
-            "I'm your personal financial advisor 💸\n"
-            "━━━━━━━━━━━━━━━━━━━\n\n"
-            "Just tell me about a purchase — any way:\n"
-            "⌨️ <b>Text</b> — 'taxi 25000'\n"
-            "🎤 <b>Voice</b> — say the purchase\n"
-            "📸 <b>Photo</b> — send a receipt\n\n"
-            "I'll log it, categorize it and give advice 🤝\n"
-            "🎯 I'll also help you save toward goals and nudge you when to ease off.\n\n"
-            "👇 The buttons below do everything else."
+            "<b>Dayon</b> — your daily assistant for money, tasks and events.\n\n"
+            "💰 Track income and expenses\n"
+            "📅 Plan events and tasks\n"
+            "🧾 Keep an eye on subscriptions and bills\n"
+            "💱 Check exchange rates and convert amounts\n\n"
+            "To open the app, tap «Open Dayon app» in the bottom-left corner."
         ),
         "help_text": (
             "ℹ️ <b>How to use</b>\n"

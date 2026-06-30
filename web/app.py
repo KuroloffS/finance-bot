@@ -8,9 +8,11 @@ import asyncio
 import logging
 import math
 import os
+import re
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+import httpx
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -261,6 +263,99 @@ def _task_dto(t: dict) -> dict:
         "created_at": t.get("created_at"),
         "completed_at": t.get("completed_at"),
     }
+
+
+# ───────────────────────── Data export (Excel) + bot delivery ─────────────────────────
+
+async def _gather_export(uid: int) -> dict:
+    """Collect all of a user's data for export (transactions, goals, debts,
+    events, payments, tasks, folders)."""
+    today = now_local().date()
+    rep, goals, debts, events, payments, tasks, folders = await asyncio.gather(
+        get_period_report(uid, "1970-01-01", today.isoformat()),
+        get_goals(uid, include_archived=True),
+        get_debts(uid),
+        get_all_events(uid),
+        get_payments(uid),
+        get_tasks(uid),
+        get_task_folders(uid),
+    )
+    return {
+        "exported_at": now_local().isoformat(),
+        "transactions": [_tx_dto(r) for r in rep["transactions"]],
+        "goals": goals,
+        "debts": debts,
+        "events": [_event_dto(e) for e in events],
+        "payments": [_payment_dto(p, today) for p in payments],
+        "tasks": [_task_dto(t) for t in tasks],
+        "folders": folders,
+    }
+
+
+_NUMRE = re.compile(r"-?\d+(\.\d+)?")
+
+
+def _xls_cell(v) -> str:
+    if v is None:
+        v = ""
+    is_num = (isinstance(v, (int, float)) and not isinstance(v, bool)) or (
+        isinstance(v, str) and v != "" and _NUMRE.fullmatch(v) is not None
+    )
+    s = (str(v).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+         .replace("\n", " ").replace("\r", " "))
+    return f'<Cell><Data ss:Type="{"Number" if is_num else "String"}">{s}</Data></Cell>'
+
+
+def _xls_sheet(name: str, headers: list, rows: list) -> str:
+    hd = "<Row>" + "".join(f'<Cell><Data ss:Type="String">{h}</Data></Cell>' for h in headers) + "</Row>"
+    bd = "".join("<Row>" + "".join(_xls_cell(c) for c in r) + "</Row>" for r in rows)
+    return f'<Worksheet ss:Name="{name}"><Table>{hd}{bd}</Table></Worksheet>'
+
+
+def _build_export_xls(data: dict) -> bytes:
+    """SpreadsheetML 2003 workbook (.xls) — opens in Excel, one sheet per module."""
+    sheets = [
+        _xls_sheet("Операции", ["Дата", "Тип", "Категория", "Сумма", "Заметка", "Магазин"],
+                   [[t["purchase_date"], "доход" if t["type"] == "income" else "расход", t["category"],
+                     t["amount"], t["description"], t["merchant"]] for t in data.get("transactions", [])]),
+        _xls_sheet("Платежи", ["Название", "Категория", "Сумма", "Валюта", "Период", "След. платёж", "Статус"],
+                   [[p["name"], p["category"], p["amount"], p["currency"], p["period"], p["next_due_date"], p["status"]]
+                    for p in data.get("payments", [])]),
+        _xls_sheet("Задачи", ["Задача", "Статус", "Приоритет", "Срок", "Теги"],
+                   [[t["title"], t["status"], t.get("priority") or "", t.get("due_date") or "",
+                     ", ".join(t.get("tags") or [])] for t in data.get("tasks", [])]),
+        _xls_sheet("События", ["Дата", "Время", "Событие", "Заметка"],
+                   [[e["date"], e.get("time") or "", e["title"], e["note"]] for e in data.get("events", [])]),
+        _xls_sheet("Цели", ["Цель", "Накоплено", "Сумма цели", "Валюта", "Статус"],
+                   [[x.get("title", ""), x.get("saved_amount", 0), x.get("target_amount", 0),
+                     x.get("currency", ""), x.get("status", "")] for x in data.get("goals", [])]),
+        _xls_sheet("Долги", ["Контрагент", "Направление", "Сумма", "Оплачено", "Валюта", "Статус"],
+                   [[x.get("counterparty", ""), x.get("direction", ""), x.get("amount", 0),
+                     x.get("paid_amount", 0), x.get("currency", ""), x.get("status", "")] for x in data.get("debts", [])]),
+    ]
+    xml = ('<?xml version="1.0" encoding="UTF-8"?>\n<?mso-application progid="Excel.Sheet"?>\n'
+           '<Workbook xmlns="urn:schemas-microsoft-com:office:spreadsheet" '
+           'xmlns:ss="urn:schemas-microsoft-com:office:spreadsheet">' + "".join(sheets) + "</Workbook>")
+    return ("﻿" + xml).encode("utf-8")
+
+
+async def _send_tg_document(chat_id: int, filename: str, content: bytes, caption: str = "") -> bool:
+    """Send a file to the user's Telegram chat via the Bot API (reliable on mobile,
+    unlike a webview blob download)."""
+    token = os.getenv("TELEGRAM_BOT_TOKEN", "")
+    if not token:
+        return False
+    data = {"chat_id": str(chat_id)}
+    if caption:
+        data["caption"] = caption
+    files = {"document": (filename, content, "application/vnd.ms-excel")}
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            r = await client.post(f"https://api.telegram.org/bot{token}/sendDocument", data=data, files=files)
+        return r.status_code == 200 and bool(r.json().get("ok"))
+    except Exception as e:
+        logger.warning("sendDocument failed for %s: %s", chat_id, e)
+        return False
 
 
 # ───────────────────────── App ─────────────────────────
@@ -988,28 +1083,23 @@ def create_app() -> FastAPI:
 
     @app.get("/api/export")
     async def api_export(user: dict = Depends(current_user)):
+        data = await _gather_export(user["telegram_id"])
+        data["currency"] = normalize_currency(user.get("currency"), DEFAULT_CURRENCY)
+        return data
+
+    @app.post("/api/export/send")
+    async def api_export_send(user: dict = Depends(current_user)):
+        """Build the Excel workbook server-side and deliver it to the user's chat
+        via the bot — works on mobile where webview file downloads don't."""
         uid = user["telegram_id"]
-        today = now_local().date()
-        rep, goals, debts, events, payments, tasks, folders = await asyncio.gather(
-            get_period_report(uid, "1970-01-01", today.isoformat()),
-            get_goals(uid, include_archived=True),
-            get_debts(uid),
-            get_all_events(uid),
-            get_payments(uid),
-            get_tasks(uid),
-            get_task_folders(uid),
-        )
-        return {
-            "exported_at": now_local().isoformat(),
-            "currency": normalize_currency(user.get("currency"), DEFAULT_CURRENCY),
-            "transactions": [_tx_dto(r) for r in rep["transactions"]],
-            "goals": goals,
-            "debts": debts,
-            "events": [_event_dto(e) for e in events],
-            "payments": [_payment_dto(p, today) for p in payments],
-            "tasks": [_task_dto(t) for t in tasks],
-            "folders": folders,
-        }
+        data = await _gather_export(uid)
+        xls = _build_export_xls(data)
+        lang = user.get("language", "ru")
+        caption = "📊 Ваши данные Dayon" if lang == "ru" else "📊 Your Dayon data"
+        ok = await _send_tg_document(uid, "finances.xls", xls, caption)
+        if not ok:
+            raise HTTPException(status_code=502, detail="could not send file")
+        return {"ok": True}
 
     @app.post("/api/wipe")
     async def api_wipe(user: dict = Depends(current_user)):

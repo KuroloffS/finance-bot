@@ -265,6 +265,79 @@ def format_monthly_report(summary: list, status: dict, lang: str, month_label: s
     return "\n".join(lines)
 
 
+def _day_month(d: date, lang: str) -> str:
+    if lang == "ru":
+        return f"{d.day} {_MONTHS_RU_GEN[d.month]}"
+    return d.strftime("%b %d")
+
+
+def _money_code(v, code: str) -> str:
+    """Report-style amount: '417 229,00 UZS' — 2 decimals, comma decimal, space thousands."""
+    s = f"{float(v or 0):,.2f}".replace(",", " ").replace(".", ",")
+    return f"{s} {code}"
+
+
+def format_month_overview(d: dict, lang: str, currency: str = DEFAULT_CURRENCY, month_label: str | None = None) -> str:
+    """Daily-assistant monthly summary: balance, income/expense/avg, top category,
+    tasks/events completed, services paid + monthly services cost."""
+    label = month_label or _month_name(lang)
+    if lang == "ru":
+        if not month_label:
+            label = label.lower() + ("" if label.lower().endswith("г.") else " г.")
+        lines = [
+            f"<b>Отчёт за {label}</b>",
+            "",
+            f"💰 <b>Баланс:</b> {_money_code(d.get('balance', 0), currency)}",
+            f"   Траты: {_money_code(d.get('expense', 0), currency)}",
+            f"   Доход: {_money_code(d.get('income', 0), currency)}",
+            f"   Ср. в день: {_money_code(d.get('avg_day', 0), currency)}",
+        ]
+        if d.get("top_category"):
+            lines.append(f"   Топ категории трат: {escape(str(d['top_category']))}")
+        lines += [
+            f"📋 Выполнено задач: {d.get('tasks_done', 0)}",
+            f"📅 Событий завершено: {d.get('events_done', 0)}",
+            f"🧾 Оплачено сервисов: {d.get('services_paid', 0)}",
+            f"   Ежемесячная трата на сервисы: {_money_code(d.get('services_monthly', 0), currency)}",
+        ]
+    else:
+        lines = [
+            f"<b>Report — {label}</b>",
+            "",
+            f"💰 <b>Balance:</b> {_money_code(d.get('balance', 0), currency)}",
+            f"   Spent: {_money_code(d.get('expense', 0), currency)}",
+            f"   Income: {_money_code(d.get('income', 0), currency)}",
+            f"   Avg/day: {_money_code(d.get('avg_day', 0), currency)}",
+        ]
+        if d.get("top_category"):
+            lines.append(f"   Top spending category: {escape(str(d['top_category']))}")
+        lines += [
+            f"📋 Tasks done: {d.get('tasks_done', 0)}",
+            f"📅 Events passed: {d.get('events_done', 0)}",
+            f"🧾 Services paid: {d.get('services_paid', 0)}",
+            f"   Monthly services cost: {_money_code(d.get('services_monthly', 0), currency)}",
+        ]
+    return "\n".join(lines)
+
+
+def format_payment_reminder(payments: list, lang: str, today: date | None = None, currency: str = DEFAULT_CURRENCY) -> str:
+    """'🔔 Завтра: <name> — <date>' for active recurring payments due tomorrow. '' if none."""
+    ref = today or date.today()
+    tomorrow = ref + timedelta(days=1)
+    due = [p for p in payments if p.get("status") == "active" and str(p.get("next_due_date") or "")[:10] == tomorrow.isoformat()]
+    if not due:
+        return ""
+    lines = []
+    for p in due:
+        cur = p.get("currency") or currency
+        name = escape(str(p.get("name", "—")))
+        dl = _day_month(tomorrow, lang)
+        head = f"🔔 <b>Завтра:</b> {name} — {dl}" if lang == "ru" else f"🔔 <b>Tomorrow:</b> {name} — {dl}"
+        lines.append(head)
+        lines.append(f"💳 {_money_code(float(p.get('amount') or 0), cur)}")
+    return "\n".join(lines)
+
+
 def format_history(transactions: list, lang: str, currency: str = DEFAULT_CURRENCY) -> str:
     header = "📋 <b>Последние траты</b>" if lang == "ru" else "📋 <b>Recent transactions</b>"
     lines = [header, DIVIDER, ""]

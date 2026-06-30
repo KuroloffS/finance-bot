@@ -94,7 +94,7 @@ async def run() -> None:
             wu = webapp_url()
             if wu:
                 await application.bot.set_chat_menu_button(
-                    menu_button=MenuButtonWebApp(text="💼 Финансы", web_app=WebAppInfo(url=wu))
+                    menu_button=MenuButtonWebApp(text="Open Dayon app", web_app=WebAppInfo(url=wu))
                 )
                 logger.info("Menu button → Mini App at %s", wu)
             else:
